@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  asset-manager:
+    build: .
+    container_name: my-asset-manager
+    ports:
+      - "8502:8502"  # [변경됨] 호스트(8502) : 컨테이너(8502)
+    volumes:
+      - ./:/app
+    restart: always

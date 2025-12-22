@@ -1,0 +1,82 @@
+{
+  "settings": {
+    "current_age": 40,
+    "retirement_age": 65
+  },
+  "assets": [
+    {
+      "id": "re-1",
+      "type": "REAL_ESTATE",
+      "name": "반포 래미안 (자가)",
+      "acquisitionDate": "2015-05-01",
+      "acquisitionPrice": 1500000000,
+      "currentValue": 3500000000,
+      "detail1": "OWNED",
+      "detail2": "NO_TENANT",
+      "detail3": 0,
+      "detail4": "서울시 서초구",
+      "detail5": 800000000,
+      "history": [{"date": "2015-05-01", "value": 1500000000}, {"date": "2024-01-01", "value": 3500000000}]
+    },
+    {
+      "id": "re-2",
+      "type": "REAL_ESTATE",
+      "name": "마포 오피스텔 (월세줌)",
+      "acquisitionDate": "2020-01-01",
+      "acquisitionPrice": 300000000,
+      "currentValue": 350000000,
+      "detail1": "OWNED",
+      "detail2": "HAS_TENANT",
+      "detail3": 20000000,
+      "detail4": "서울시 마포구",
+      "detail5": 100000000,
+      "history": [{"date": "2020-01-01", "value": 300000000}]
+    },
+    {
+      "id": "st-1",
+      "type": "STOCK",
+      "name": "삼성전자",
+      "detail1": "키움증권",
+      "detail2": "KRW",
+      "detail3": 200,
+      "detail4": 70000,
+      "currentValue": 15000000,
+      "acquisitionDate": "2023-01-01",
+      "acquisitionPrice": 70000,
+      "quantity": 200,
+      "accountName": "키움증권",
+      "history": [{"date": "2023-01-01", "price": 70000, "quantity": 200}]
+    },
+    {
+      "id": "st-2",
+      "type": "STOCK",
+      "name": "TIGER 미국S&P500",
+      "detail1": "토스증권(IRP)",
+      "detail2": "KRW",
+      "detail3": 1000,
+      "detail4": 12000,
+      "detail5": "Y",
+      "currentValue": 13500000,
+      "acquisitionDate": "2022-01-01",
+      "acquisitionPrice": 12000,
+      "quantity": 1000,
+      "accountName": "토스증권(IRP)",
+      "history": [{"date": "2022-01-01", "price": 12000, "quantity": 1000}]
+    },
+    {
+      "id": "pen-1",
+      "type": "PENSION",
+      "name": "국민연금 예상액",
+      "detail1": "NATIONAL",
+      "detail2": 2045,
+      "detail3": 1500000,
+      "detail4": 0,
+      "currentValue": 80000000,
+      "acquisitionDate": "2010-01-01",
+      "pensionType": "NATIONAL",
+      "expectedStartYear": 2045,
+      "expectedMonthlyPayout": 1500000,
+      "history": [{"date": "2024-01-01", "value": 80000000}]
+    }
+  ]
+}

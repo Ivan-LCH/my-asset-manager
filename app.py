@@ -195,7 +195,7 @@ def recalculate_account_balance(account_name, target_total=None):
         st.session_state.assets.append(new_adj)
 
 # -----------------------------------------------------------------------------------------------------
-# [핵심 로직] 차트 데이터 생성 (기간 설정 적용)
+# [핵심 로직] 차트 데이터 생성 (기간 설정 + 실물자산 단가 적용)
 # -----------------------------------------------------------------------------------------------------
 def generate_history_df(assets, type_filter=None):
     if not assets: return pd.DataFrame()
@@ -205,13 +205,10 @@ def generate_history_df(assets, type_filter=None):
     rows = []
     today = datetime.now()
     
-    # [수정] 자산 타입별 차트 기간 설정
-    # 대시보드(None) 또는 부동산 -> 10년
-    # 그 외 -> 3년
-    if type_filter is None or type_filter == 'REAL_ESTATE':
-        period_years = 10
-    else:
-        period_years = 3
+    # [수정] 기간 설정 로직 (대시보드/부동산=10년, 나머지=3년)
+    # type_filter가 None이면 대시보드
+    is_long_term = (type_filter is None) or (type_filter == 'REAL_ESTATE')
+    period_years = 10 if is_long_term else 3
         
     START_LIMIT = today - timedelta(days=365 * period_years)
     
@@ -235,14 +232,19 @@ def generate_history_df(assets, type_filter=None):
             
         val_map = {}
         
+        # [수정] 실물자산(PHYSICAL)도 주식처럼 수량 기반 계산 지원
+        is_qty_based = a['type'] in ['STOCK', 'PHYSICAL']
+        
+        # (1) 초기값
         init_val = safe_float(a.get('acquisitionPrice', 0))
-        if a['type'] == 'STOCK':
+        if is_qty_based:
             qty = safe_float(a.get('quantity', 0))
             if qty == 0 and a.get('detail5') == 'BALANCE_ADJUSTMENT': qty = 1
-            init_val = init_val * qty
+            if qty > 0: init_val = init_val * qty
 
         val_map[acq_date] = init_val
         
+        # (2) 히스토리
         hist_str = a.get('history', [])
         history = []
         if isinstance(hist_str, str):
@@ -255,14 +257,18 @@ def generate_history_df(assets, type_filter=None):
                 try:
                     d = datetime.strptime(h['date'], "%Y-%m-%d")
                     v = 0
-                    if 'value' in h: v = safe_float(h['value'])
-                    elif 'price' in h and 'quantity' in h: v = safe_float(h['price']) * safe_float(h['quantity'])
+                    if 'value' in h: 
+                        v = safe_float(h['value'])
+                    elif 'price' in h and 'quantity' in h: 
+                        v = safe_float(h['price']) * safe_float(h['quantity'])
                     val_map[d] = v
                 except: pass
         
+        # (3) 현재값
         if not disp_date: val_map[today] = safe_float(a.get('currentValue', 0))
         else: val_map[disp_date] = safe_float(a.get('disposalPrice', 0))
 
+        # (4) Forward Fill
         sorted_dates = sorted(val_map.keys())
         
         for d in full_date_range:
@@ -297,6 +303,8 @@ def generate_history_df(assets, type_filter=None):
 def render_asset_detail(asset):
     a_type = asset['type']
     is_adj = (a_type == 'STOCK' and asset.get('detail5') == 'BALANCE_ADJUSTMENT')
+    # [수정] 수량 기반 자산 여부 (주식 + 실물)
+    is_qty_based = a_type in ['STOCK', 'PHYSICAL']
     
     val = safe_float(asset['currentValue'])
     acq_price = safe_float(asset.get('acquisitionPrice', 0))
@@ -315,7 +323,7 @@ def render_asset_detail(asset):
         else: st.markdown(f"<div class='info-label'>유형</div><div class='info-value'>{TYPE_LABEL_MAP.get(a_type, a_type)}</div>", unsafe_allow_html=True)
     with col2: st.markdown(f"<div class='info-label'>취득일</div><div class='info-value'>{acq_date}</div>", unsafe_allow_html=True)
     with col3:
-        if a_type == 'STOCK' and not is_adj:
+        if is_qty_based and not is_adj:
             invested = acq_price * safe_float(asset.get('quantity', 0))
             st.markdown(f"<div class='info-label'>투자원금</div><div class='info-value'>{format_money(invested)}</div>", unsafe_allow_html=True)
         else: st.markdown(f"<div class='info-label'>취득가</div><div class='info-value'>{format_money(acq_price)}</div>", unsafe_allow_html=True)
@@ -348,7 +356,7 @@ def render_asset_detail(asset):
         k1, v1 = "현재 시세" if not is_sold else "매각 금액", format_money(display_val)
         k2, v2 = "부채 총계", format_money(liab)
         k3, v3 = "순자산 (Equity)", format_money(equity)
-    elif a_type == 'STOCK':
+    elif is_qty_based:
         if is_adj:
             k1, v1 = "보정 금액", format_money(display_val)
             k2, v2 = "-", "-"
@@ -360,7 +368,7 @@ def render_asset_detail(asset):
             roi = (pl / invested * 100) if invested > 0 else 0
             k1, v1 = "평가 금액", format_money(display_val)
             k2, v2 = "평가 손익", f"{format_money(pl)} ({roi:+.1f}%)"
-            k3, v3 = "보유 수량", f"{qty:,.0f} 주"
+            k3, v3 = "보유 수량", f"{qty:,.0f}"
     else:
         k1, v1 = "현재 가치", format_money(display_val)
         k2, v2 = "-", "-"
@@ -375,13 +383,23 @@ def render_asset_detail(asset):
 
     # [3] 차트
     st.markdown("##### 📉 가치 변동 추이")
-    df_chart = generate_history_df([asset])
+    # [수정] 상세 화면에서도 type을 넘겨서 기간 설정(3년/10년)을 따르게 함
+    df_chart = generate_history_df([asset], type_filter=a_type)
+    
     if not df_chart.empty:
         df_chart['value_man'] = df_chart['value'] / 10000
         fig = px.area(df_chart, x='date', y='value_man', 
                       color_discrete_sequence=[COLOR_MAP.get(a_type, '#888')],
                       labels={'value_man': '가치(만원)'})
-        fig.update_layout(height=250, margin=dict(t=10, b=0, l=0, r=0), xaxis_title=None, yaxis_title=None)
+        
+        # [수정] 차트 개선 (Hover Unified + X축 촘촘하게)
+        fig.update_layout(
+            height=250, 
+            margin=dict(t=10, b=0, l=0, r=0), 
+            xaxis_title=None, yaxis_title=None,
+            hovermode="x unified",
+            xaxis=dict(nticks=20, tickformat="%y.%m.%d")
+        )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.info("데이터가 부족하여 차트를 표시할 수 없습니다.")
@@ -391,6 +409,7 @@ def render_asset_detail(asset):
     if is_adj:
         st.info("🔒 이 항목은 계좌 총액에 맞춰 자동으로 계산되는 '잔고 보정' 항목입니다. 수동으로 수정할 수 없습니다.")
     else:
+        # [4] 이력 관리 & 수정
         c_left, c_right = st.columns([2, 1])
         with c_left:
             st.markdown("##### 📝 이력 관리")
@@ -399,11 +418,10 @@ def render_asset_detail(asset):
                 try: hist_raw = json.loads(hist_raw)
                 except: hist_raw = []
             
-            is_stock = (a_type == 'STOCK')
             data_list = []
             for h in hist_raw:
                 row = {'date': h.get('date', '')}
-                if is_stock:
+                if is_qty_based:
                     row['price'] = safe_float(h.get('price', 0))
                     row['quantity'] = safe_float(h.get('quantity', 0))
                 else:
@@ -412,7 +430,7 @@ def render_asset_detail(asset):
                 
             df_edit = pd.DataFrame(data_list)
             if df_edit.empty:
-                df_edit = pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'value': [0.0]}) if not is_stock else pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'price': [0.0], 'quantity': [0.0]})
+                df_edit = pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'value': [0.0]}) if not is_qty_based else pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'price': [0.0], 'quantity': [0.0]})
 
             edited_df = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True, key=f"ed_{asset['id']}")
             
@@ -421,7 +439,7 @@ def render_asset_detail(asset):
                 for _, row in edited_df.iterrows():
                     d_str = str(row['date'])[:10]
                     rec = {'date': d_str}
-                    if is_stock:
+                    if is_qty_based:
                         rec['price'] = safe_float(row.get('price'))
                         rec['quantity'] = safe_float(row.get('quantity'))
                     else:
@@ -432,7 +450,7 @@ def render_asset_detail(asset):
                 asset['history'] = new_hist
                 if new_hist:
                     last = new_hist[-1]
-                    if is_stock:
+                    if is_qty_based:
                         asset['currentValue'] = last['price'] * last['quantity']
                         asset['quantity'] = last['quantity']
                     else:
@@ -446,7 +464,7 @@ def render_asset_detail(asset):
             st.markdown("##### ➕ 신규 데이터")
             with st.form(f"add_h_{asset['id']}"):
                 n_date = st.date_input("날짜", value=datetime.now())
-                if is_stock:
+                if is_qty_based:
                     n_p = st.number_input("단가", min_value=0.0)
                     n_q = st.number_input("수량", min_value=0.0, value=safe_float(asset.get('quantity')))
                 else:
@@ -460,7 +478,7 @@ def render_asset_detail(asset):
                         except: h = []
                     elif not isinstance(h, list): h = []
                     
-                    if is_stock:
+                    if is_qty_based:
                         h.append({"date": d_str, "price": n_p, "quantity": n_q})
                         asset['currentValue'] = n_p * n_q
                         asset['quantity'] = n_q
@@ -611,7 +629,8 @@ if menu == "📊 대시보드":
             
             st.markdown("---")
             st.subheader("📈 자산 성장 추이 (최근 10년)")
-            df_hist = generate_history_df(assets)
+            # 대시보드는 전체(10년) 기준
+            df_hist = generate_history_df(assets) 
             if not df_hist.empty:
                 df_hist['value_man'] = df_hist['value'] / 10000
                 df_area = df_hist.groupby(['date', 'type'])['value_man'].sum().reset_index()
@@ -619,6 +638,12 @@ if menu == "📊 대시보드":
                 fig_area = px.area(df_area, x='date', y='value_man', color='label', 
                                    color_discrete_map={v: COLOR_MAP[k] for k, v in TYPE_LABEL_MAP.items()},
                                    labels={'value_man': '가치(만원)'})
+                
+                # [수정] 대시보드 차트도 가독성 개선
+                fig_area.update_layout(
+                    hovermode="x unified",
+                    xaxis=dict(nticks=20, tickformat="%y.%m.%d")
+                )
                 st.plotly_chart(fig_area, use_container_width=True)
 
 # -----------------------------------------------------------------------------------------------------
@@ -635,9 +660,11 @@ elif menu in TYPE_LABEL_MAP.values():
     my_assets = [a for a in assets if a['type'] == target_type]
     
     if my_assets:
+        # [수정] 상단 차트도 자산 유형별 기간(3년/10년) 적용
         df_hist = generate_history_df(my_assets, target_type)
         if not df_hist.empty:
             df_hist['value_man'] = df_hist['value'] / 10000
+            
             if target_type == 'STOCK' and view_mode == "계좌별 보기":
                 df_chart_grp = df_hist.groupby(['date', 'account'])['value_man'].sum().reset_index()
                 fig = px.area(df_chart_grp, x='date', y='value_man', color='account', 
@@ -645,7 +672,13 @@ elif menu in TYPE_LABEL_MAP.values():
             else:
                 fig = px.area(df_hist, x='date', y='value_man', color='name', 
                               color_discrete_sequence=PASTEL_COLORS, labels={'value_man': '가치(만원)'})
-            fig.update_layout(height=300, margin=dict(t=0, b=0, l=0, r=0))
+                
+            fig.update_layout(
+                height=300, 
+                margin=dict(t=0, b=0, l=0, r=0),
+                hovermode="x unified",
+                xaxis=dict(nticks=20, tickformat="%y.%m.%d")
+            )
             st.plotly_chart(fig, use_container_width=True)
 
     if target_type == 'PENSION':
@@ -676,14 +709,28 @@ elif menu in TYPE_LABEL_MAP.values():
             df_sim = pd.DataFrame(data)
             fig_sim = px.bar(df_sim, x='age', y=[c for c in df_sim.columns if c not in ['age','total']], 
                              labels={'value':'월수령액(만원)'}, color_discrete_sequence=PASTEL_COLORS)
-            fig_sim.update_layout(barmode='stack', height=300)
+            fig_sim.update_layout(
+                barmode='stack', 
+                height=300,
+                hovermode="x unified"
+            )
             st.plotly_chart(fig_sim, use_container_width=True)
 
     with st.expander(f"➕ 신규 {menu.split()[1]} 추가"):
         with st.form("add_new"):
             c1, c2 = st.columns(2)
             n_name = c1.text_input("자산명")
-            n_val = c2.number_input("현재가치/취득가", min_value=0)
+            
+            # [수정] 실물자산/주식은 수량/단가 입력
+            if target_type in ['STOCK', 'PHYSICAL']:
+                n_qty = c2.number_input("수량", min_value=0.0)
+                n_price = st.number_input("단가", min_value=0.0)
+                n_val = n_qty * n_price
+            else:
+                n_val = c2.number_input("현재가치/취득가", min_value=0)
+                n_qty = 0
+                n_price = 0
+                
             n_date = st.date_input("취득일").strftime("%Y-%m-%d")
             
             n_acc = ""
@@ -692,8 +739,9 @@ elif menu in TYPE_LABEL_MAP.values():
             
             if st.form_submit_button("추가"):
                 new_a = {"id":str(uuid.uuid4()), "type":target_type, "name":n_name, "currentValue":n_val, 
-                         "acquisitionPrice":n_val, "acquisitionDate":n_date, "accountName":n_acc,
-                         "history":[{"date":n_date, "value":n_val}]}
+                         "acquisitionPrice":n_val if n_price==0 else n_price, "acquisitionDate":n_date, "accountName":n_acc,
+                         "quantity": n_qty,
+                         "history":[{"date":n_date, "value":n_val, "price":n_price, "quantity":n_qty}]}
                 st.session_state.assets.append(new_a)
                 st.success("추가되었습니다.")
                 st.rerun()
@@ -704,6 +752,7 @@ elif menu in TYPE_LABEL_MAP.values():
         accounts = list(set([a.get('accountName', '기타') for a in my_assets]))
         for acc in accounts:
             acc_assets = [a for a in my_assets if a.get('accountName') == acc]
+            
             pure_stock_sum = sum([safe_float(a['currentValue']) for a in acc_assets if a.get('detail5') != 'BALANCE_ADJUSTMENT'])
             total_with_adj = sum([safe_float(a['currentValue']) for a in acc_assets])
             current_target = st.session_state.settings.get(f"ACC_TOTAL_{acc}", total_with_adj)
@@ -735,7 +784,7 @@ elif menu in TYPE_LABEL_MAP.values():
                 render_asset_detail(a)
 
 # -----------------------------------------------------------------------------------------------------
-# 설정 (편집 기능 추가됨)
+# 설정
 # -----------------------------------------------------------------------------------------------------
 elif menu == "⚙️ 설정":
     st.title("⚙️ 설정")
@@ -749,3 +798,4 @@ elif menu == "⚙️ 설정":
             st.success("설정이 적용되었습니다. (구글 시트에 반영하려면 사이드바의 '저장하기'를 눌러주세요)")
             st.rerun()
     st.info("💡 설정 값은 앱의 은퇴 시뮬레이션 등에 사용됩니다.")
+

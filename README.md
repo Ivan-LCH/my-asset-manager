@@ -47,7 +47,8 @@ my-asset-manager/
 ├── data/                # 🗃️ 자산 데이터 파일 (csv/excel) *Git 제외 (.gitignore)
 ├── requirements.txt     # 📦 프로젝트 의존성 라이브러리 목록
 └── README.md            # 📄 프로젝트 문서
-⚙️ 설치 및 실행 (Installation & Run)
+
+## ⚙️ 설치 및 실행 (Installation & Run)
 1. 저장소 복제 (Clone)
 Bash
 
@@ -63,9 +64,9 @@ Bash
 streamlit run app.py
 실행 후 브라우저가 자동으로 열리며 http://localhost:8501에서 대시보드를 확인할 수 있습니다.
 
-🔒 보안 및 데이터 (Security)
+## 🔒 보안 및 데이터 (Security)
 개인 자산 데이터가 포함된 파일(data/*.csv, secrets.toml 등)은 .gitignore 처리가 되어 있어 리포지토리에 업로드되지 않습니다.
 
 본 프로젝트는 로컬 환경에서의 실행을 권장합니다.
 
-Author: Ivan-LCH Last Updated: 2025-12-26
+## Author: Ivan-LCH Last Updated: 2025-12-26

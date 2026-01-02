@@ -81,6 +81,40 @@ def safe_int(val):
 def format_money(val):
     return f"₩{val:,.0f}"
 
+
+# -----------------------------------------------------------------------------------------------------
+# [추가] 카테고리별 요약 카드 표시 함수
+# -----------------------------------------------------------------------------------------------------
+def display_category_summary(asset_name, assets_subset):
+    if not assets_subset:
+        return
+
+    cat_total_asset = 0
+    cat_total_liab = 0
+
+    for a in assets_subset:
+        # 매각된 자산은 합계에서 제외 (대시보드 로직과 동일)
+        if a.get('disposalDate'): continue
+        
+        val = safe_float(a.get('currentValue'))
+        cat_total_asset += val
+        
+        # 부동산일 경우 부채(대출+보증금) 계산
+        if a['type'] == 'REAL_ESTATE':
+            cat_total_liab += safe_float(a.get('loanAmount', 0))
+            cat_total_liab += safe_float(a.get('tenantDeposit', 0))
+            
+    cat_net_worth = cat_total_asset - cat_total_liab
+    
+    # 화면 표시
+    c1, c2, c3 = st.columns(3)
+    with c1: st.markdown(render_kpi_card_html(f"💰 {asset_name} 자산", format_money(cat_total_asset)), unsafe_allow_html=True)
+    with c2: st.markdown(render_kpi_card_html(f"📉 {asset_name} 부채", format_money(cat_total_liab), "#e03131"), unsafe_allow_html=True)
+    with c3: st.markdown(render_kpi_card_html(f"💎 {asset_name} 순자산", format_money(cat_net_worth), "#1c7ed6"), unsafe_allow_html=True)
+    
+    st.markdown("---")
+
+
 def render_kpi_card_html(label, value, color="#212529", sub=""):
     return f"""
     <div class="metric-card">
@@ -659,6 +693,8 @@ elif menu in TYPE_LABEL_MAP.values():
     
     my_assets = [a for a in assets if a['type'] == target_type]
     
+    display_category_summary(menu, my_assets)
+
     if my_assets:
         # [수정] 상단 차트도 자산 유형별 기간(3년/10년) 적용
         df_hist = generate_history_df(my_assets, target_type)

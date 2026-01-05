@@ -331,52 +331,65 @@ def generate_history_df(assets, type_filter=None):
             
     return pd.DataFrame(rows)
 
+
 # -----------------------------------------------------------------------------------------------------
 # [통합] 자산 상세 렌더러
 # -----------------------------------------------------------------------------------------------------
 def render_asset_detail(asset):
-    a_type = asset['type']
-    is_adj = (a_type == 'STOCK' and asset.get('detail5') == 'BALANCE_ADJUSTMENT')
+    a_type       = asset['type']
+    is_adj       = (a_type == 'STOCK' and asset.get('detail5') == 'BALANCE_ADJUSTMENT')
     # [수정] 수량 기반 자산 여부 (주식 + 실물)
     is_qty_based = a_type in ['STOCK', 'PHYSICAL']
     
-    val = safe_float(asset['currentValue'])
-    acq_price = safe_float(asset.get('acquisitionPrice', 0))
-    acq_date = asset.get('acquisitionDate', '-')
+    val          = safe_float(asset['currentValue'])
+    acq_price    = safe_float(asset.get('acquisitionPrice', 0))
+    acq_date     = asset.get('acquisitionDate', '-')
     
-    disp_date = asset.get('disposalDate')
-    disp_price = safe_float(asset.get('disposalPrice', 0))
-    is_sold = True if disp_date else False
-    display_val = disp_price if is_sold else val
+    disp_date    = asset.get('disposalDate')
+    disp_price   = safe_float(asset.get('disposalPrice', 0))
+    is_sold      = True if disp_date else False
+    display_val  = disp_price if is_sold else val
     
+
     # [1] 기본 정보
     col1, col2, col3, col4 = st.columns(4)
     with col1:
-        if a_type == 'REAL_ESTATE': st.markdown(f"<div class='info-label'>위치</div><div class='info-value'>{asset.get('address', '-')}</div>", unsafe_allow_html=True)
-        elif a_type == 'STOCK': st.markdown(f"<div class='info-label'>계좌</div><div class='info-value'>{asset.get('accountName', '-')}</div>", unsafe_allow_html=True)
-        else: st.markdown(f"<div class='info-label'>유형</div><div class='info-value'>{TYPE_LABEL_MAP.get(a_type, a_type)}</div>", unsafe_allow_html=True)
+        if   a_type == 'REAL_ESTATE': st.markdown(f"<div class='info-label'>위치</div><div class='info-value'>{asset.get('address'    , '-')}</div>", unsafe_allow_html=True)
+        elif a_type == 'STOCK':       st.markdown(f"<div class='info-label'>계좌</div><div class='info-value'>{asset.get('accountName', '-')}</div>", unsafe_allow_html=True)
+        elif a_type == 'PENSION':     st.markdown(f"<div class='info-label'>유형</div><div class='info-value'>{TYPE_LABEL_MAP.get(a_type, a_type)}</div>", unsafe_allow_html=True)
+        else:                         st.markdown(f"<div class='info-label'>유형</div><div class='info-value'>{TYPE_LABEL_MAP.get(a_type, a_type)}</div>", unsafe_allow_html=True)
+    
     with col2: st.markdown(f"<div class='info-label'>취득일</div><div class='info-value'>{acq_date}</div>", unsafe_allow_html=True)
+    
     with col3:
         if is_qty_based and not is_adj:
             invested = acq_price * safe_float(asset.get('quantity', 0))
             st.markdown(f"<div class='info-label'>투자원금</div><div class='info-value'>{format_money(invested)}</div>", unsafe_allow_html=True)
-        else: st.markdown(f"<div class='info-label'>취득가</div><div class='info-value'>{format_money(acq_price)}</div>", unsafe_allow_html=True)
+        else: 
+            st.markdown(f"<div class='info-label'>취득가</div><div class='info-value'>{format_money(acq_price)}</div>", unsafe_allow_html=True)
+    
     with col4:
-        if is_sold: st.markdown(f"<div class='info-label'>매각일</div><div class='info-value' style='color:#e03131;'>{disp_date}</div>", unsafe_allow_html=True)
-        else: st.markdown(f"<div class='info-label'>상태</div><div class='info-value'>보유중</div>", unsafe_allow_html=True)
+        if is_sold: 
+            st.markdown(f"<div class='info-label'>매각일</div><div class='info-value' style='color:#e03131;'>{disp_date}</div>", unsafe_allow_html=True)
+        else: 
+            st.markdown(f"<div class='info-label'>상태</div><div class='info-value'>보유중</div>", unsafe_allow_html=True)
 
     if a_type == 'REAL_ESTATE':
         st.markdown("")
         c1, c2, c3, c4 = st.columns(4)
-        with c1: st.markdown(f"<div class='info-label'>대출금</div><div class='info-value'>{format_money(safe_float(asset.get('loanAmount',0)))}</div>", unsafe_allow_html=True)
-        with c2: st.markdown(f"<div class='info-label'>보증금</div><div class='info-value'>{format_money(safe_float(asset.get('tenantDeposit',0)))}</div>", unsafe_allow_html=True)
+        with c1: 
+            st.markdown(f"<div class='info-label'>대출금</div><div class='info-value'>{format_money(safe_float(asset.get('loanAmount',0)))}</div>", unsafe_allow_html=True)
+        with c2: 
+            st.markdown(f"<div class='info-label'>보증금</div><div class='info-value'>{format_money(safe_float(asset.get('tenantDeposit',0)))}</div>", unsafe_allow_html=True)
         with c3: 
             badges = []
-            if asset.get('isOwned'): badges.append('<span class="badge badge-blue">자가</span>')
-            else: badges.append('<span class="badge badge-gray">임대</span>')
+            if asset.get('isOwned')  : badges.append('<span class="badge badge-blue">자가</span>')
+            else                     : badges.append('<span class="badge badge-gray">임대</span>')
             if asset.get('hasTenant'): badges.append('<span class="badge badge-green">세입자O</span>')
+
             st.markdown("".join(badges), unsafe_allow_html=True)
     
+
     if a_type == 'PENSION':
         st.markdown("")
         st.markdown(f"<div class='info-label'>매년 증가율</div><div class='info-value' style='color:#228be6;'>{asset.get('annualGrowthRate', 0)}%</div>", unsafe_allow_html=True)
@@ -385,24 +398,25 @@ def render_asset_detail(asset):
 
     # [2] KPI
     if a_type == 'REAL_ESTATE':
-        liab = safe_float(asset.get('loanAmount', 0)) + safe_float(asset.get('tenantDeposit', 0))
+        liab   = safe_float(asset.get('loanAmount', 0)) + safe_float(asset.get('tenantDeposit', 0))
         equity = display_val - liab
         k1, v1 = "현재 시세" if not is_sold else "매각 금액", format_money(display_val)
         k2, v2 = "부채 총계", format_money(liab)
         k3, v3 = "순자산 (Equity)", format_money(equity)
+
     elif is_qty_based:
         if is_adj:
             k1, v1 = "보정 금액", format_money(display_val)
             k2, v2 = "-", "-"
             k3, v3 = "계좌 잔고 보정용", "자동 계산됨"
         else:
-            qty = safe_float(asset.get('quantity', 0))
+            qty      = safe_float(asset.get('quantity', 0))
             invested = acq_price * qty
-            pl = display_val - invested
-            roi = (pl / invested * 100) if invested > 0 else 0
-            k1, v1 = "평가 금액", format_money(display_val)
-            k2, v2 = "평가 손익", f"{format_money(pl)} ({roi:+.1f}%)"
-            k3, v3 = "보유 수량", f"{qty:,.0f}"
+            pl       = display_val - invested
+            roi      = (pl / invested * 100) if invested > 0 else 0
+            k1, v1   = "평가 금액", format_money(display_val)
+            k2, v2   = "평가 손익", f"{format_money(pl)} ({roi:+.1f}%)"
+            k3, v3   = "보유 수량", f"{qty:,.0f}"
     else:
         k1, v1 = "현재 가치", format_money(display_val)
         k2, v2 = "-", "-"
@@ -422,17 +436,22 @@ def render_asset_detail(asset):
     
     if not df_chart.empty:
         df_chart['value_man'] = df_chart['value'] / 10000
-        fig = px.area(df_chart, x='date', y='value_man', 
-                      color_discrete_sequence=[COLOR_MAP.get(a_type, '#888')],
-                      labels={'value_man': '가치(만원)'})
+        fig = px.area(
+            df_chart, 
+            x                       = 'date', 
+            y                       = 'value_man', 
+            color_discrete_sequence = [COLOR_MAP.get(a_type, '#888')],
+            labels                  = {'value_man': '가치(만원)'}
+        )
         
         # [수정] 차트 개선 (Hover Unified + X축 촘촘하게)
         fig.update_layout(
-            height=250, 
-            margin=dict(t=10, b=0, l=0, r=0), 
-            xaxis_title=None, yaxis_title=None,
-            hovermode="x unified",
-            xaxis=dict(nticks=20, tickformat="%y.%m.%d")
+            height                  = 250, 
+            margin                  = dict(t=10, b=0, l=0, r=0), 
+            xaxis_title             = None, 
+            yaxis_title             = None,
+            hovermode               = "x unified",
+            xaxis                   = dict(nticks=20, tickformat="%y.%m.%d")
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
@@ -447,19 +466,20 @@ def render_asset_detail(asset):
         c_left, c_right = st.columns([2, 1])
         with c_left:
             st.markdown("##### 📝 이력 관리")
+            
             hist_raw = asset.get('history', [])
             if isinstance(hist_raw, str):
-                try: hist_raw = json.loads(hist_raw)
+                try   : hist_raw = json.loads(hist_raw)
                 except: hist_raw = []
             
             data_list = []
             for h in hist_raw:
                 row = {'date': h.get('date', '')}
                 if is_qty_based:
-                    row['price'] = safe_float(h.get('price', 0))
+                    row['price'   ] = safe_float(h.get('price', 0))
                     row['quantity'] = safe_float(h.get('quantity', 0))
                 else:
-                    row['value'] = safe_float(h.get('value', 0))
+                    row['value'   ] = safe_float(h.get('value', 0))
                 data_list.append(row)
                 
             df_edit = pd.DataFrame(data_list)
@@ -469,15 +489,18 @@ def render_asset_detail(asset):
             edited_df = st.data_editor(df_edit, num_rows="dynamic", use_container_width=True, key=f"ed_{asset['id']}")
             
             if st.button("이력 저장", key=f"bs_{asset['id']}"):
+                st.session_state['expanded_asset_id'] = asset['id']
+                st.session_state['expanded_account' ] = asset.get('accountName') # 주식 계좌 뷰를 위해 계좌명도 저장
+                
                 new_hist = []
                 for _, row in edited_df.iterrows():
                     d_str = str(row['date'])[:10]
                     rec = {'date': d_str}
                     if is_qty_based:
-                        rec['price'] = safe_float(row.get('price'))
+                        rec['price'   ] = safe_float(row.get('price'))
                         rec['quantity'] = safe_float(row.get('quantity'))
                     else:
-                        rec['value'] = safe_float(row.get('value'))
+                        rec['value'   ] = safe_float(row.get('value'))
                     new_hist.append(rec)
                 
                 new_hist.sort(key=lambda x: x['date'])
@@ -486,7 +509,7 @@ def render_asset_detail(asset):
                     last = new_hist[-1]
                     if is_qty_based:
                         asset['currentValue'] = last['price'] * last['quantity']
-                        asset['quantity'] = last['quantity']
+                        asset['quantity'    ] = last['quantity']
                     else:
                         asset['currentValue'] = last['value']
                 
@@ -505,17 +528,20 @@ def render_asset_detail(asset):
                     n_v = st.number_input("평가액", min_value=0.0, value=val)
                     
                 if st.form_submit_button("추가"):
+                    st.session_state['expanded_asset_id'] = asset['id']
+                    st.session_state['expanded_account' ] = asset.get('accountName') 
+
                     d_str = n_date.strftime("%Y-%m-%d")
                     h = asset.get('history', [])
                     if isinstance(h, str): 
-                        try: h = json.loads(h)
+                        try   : h = json.loads(h)
                         except: h = []
                     elif not isinstance(h, list): h = []
                     
                     if is_qty_based:
                         h.append({"date": d_str, "price": n_p, "quantity": n_q})
                         asset['currentValue'] = n_p * n_q
-                        asset['quantity'] = n_q
+                        asset['quantity'    ] = n_q
                     else:
                         h.append({"date": d_str, "value": n_v})
                         asset['currentValue'] = n_v
@@ -555,24 +581,45 @@ def render_asset_detail(asset):
                 e_disp_p = c_d2.number_input("매각금액", value=disp_price)
                 
                 if st.form_submit_button("속성 저장"):
-                    asset['name'] = e_name
-                    asset['acquisitionDate'] = e_acq_d
+                    st.session_state['expanded_asset_id'] = asset['id']
+                    st.session_state['expanded_account' ] = asset.get('accountName') 
+
+                    asset['name'            ] = e_name
+                    asset['acquisitionDate' ] = e_acq_d
                     asset['acquisitionPrice'] = e_acq_p
-                    asset['disposalDate'] = e_disp_d
-                    asset['disposalPrice'] = e_disp_p
+                    asset['disposalDate'    ] = e_disp_d
+                    asset['disposalPrice'   ] = e_disp_p
                     
                     if a_type == 'REAL_ESTATE':
-                        asset['address'] = e_addr
-                        asset['loanAmount'] = e_loan
-                        asset['tenantDeposit'] = e_dep
+                        asset['address'              ] = e_addr
+                        asset['loanAmount'           ] = e_loan
+                        asset['tenantDeposit'        ] = e_dep
                     
                     if a_type == 'PENSION':
                         asset['expectedMonthlyPayout'] = e_mon_pay
-                        asset['detail5'] = e_growth
-                        asset['annualGrowthRate'] = e_growth
+                        asset['detail5'              ] = e_growth
+                        asset['annualGrowthRate'     ] = e_growth
 
                     st.success("저장됨")
                     st.rerun()
+
+            if not is_adj:
+                st.markdown("-`--")
+                # 폼(form) 밖에서 버튼을 만들어야 바로 동작합니다.
+                col_del_1, col_del_2 = st.columns([4, 1])
+                with col_del_2:
+                    if st.button("🗑️ 삭제", key=f"del_btn_{asset['id']}", type="primary", help="이 자산을 영구적으로 삭제합니다."):
+                        st.session_state['expanded_account'] = asset.get('accountName')                        
+                        # 1. 자산 리스트에서 해당 ID를 가진 항목 제외 (삭제)
+                        st.session_state.assets = [a for a in st.session_state.assets if a['id'] != asset['id']]
+                        
+                        # 2. 주식일 경우, 계좌 총액 잔고 재계산 (보정 항목 업데이트)
+                        if asset['type'] == 'STOCK':
+                            recalculate_account_balance(asset.get('accountName'))
+                            
+                        st.toast("자산이 삭제되었습니다.")
+                        st.rerun()                    
+
 
 # -----------------------------------------------------------------------------------------------------
 # [초기화]
@@ -584,6 +631,7 @@ if 'assets' not in st.session_state:
 
 assets = st.session_state.assets
 load_css()
+
 
 # -----------------------------------------------------------------------------------------------------
 # [사이드바]
@@ -681,7 +729,7 @@ if menu == "📊 대시보드":
                 st.plotly_chart(fig_area, use_container_width=True)
 
 # -----------------------------------------------------------------------------------------------------
-# 2. 부동산 / 기타
+# 2. 자산별 
 # -----------------------------------------------------------------------------------------------------
 elif menu in TYPE_LABEL_MAP.values():
     target_type = [k for k, v in TYPE_LABEL_MAP.items() if v == menu][0]
@@ -774,6 +822,9 @@ elif menu in TYPE_LABEL_MAP.values():
                 n_acc = st.text_input("계좌명")
             
             if st.form_submit_button("추가"):
+                st.session_state['expanded_asset_id'] = asset['id']
+                st.session_state['expanded_account'] = asset.get('accountName')
+
                 new_a = {"id":str(uuid.uuid4()), "type":target_type, "name":n_name, "currentValue":n_val, 
                          "acquisitionPrice":n_val if n_price==0 else n_price, "acquisitionDate":n_date, "accountName":n_acc,
                          "quantity": n_qty,
@@ -793,10 +844,13 @@ elif menu in TYPE_LABEL_MAP.values():
             total_with_adj = sum([safe_float(a['currentValue']) for a in acc_assets])
             current_target = st.session_state.settings.get(f"ACC_TOTAL_{acc}", total_with_adj)
 
-            with st.expander(f"📂 {acc} (현재 총액: {format_money(total_with_adj)})"):
+            is_acc_open    = (acc == st.session_state.get('expanded_account'))            
+
+            with st.expander(f"📂 {acc} (현재 총액: {format_money(total_with_adj)})", expanded=is_acc_open):
                 with st.form(f"acc_bal_{acc}"):
-                    c1, c2 = st.columns([3, 1])
+                    c1, c2    = st.columns([3, 1])
                     new_total = c1.number_input(f"'{acc}' 실제 계좌 총 평가액 입력", value=float(current_target))
+
                     if c2.form_submit_button("잔고 보정 실행"):
                         recalculate_account_balance(acc, new_total)
                         st.success("보정 완료")
@@ -806,9 +860,11 @@ elif menu in TYPE_LABEL_MAP.values():
                 for a in acc_assets:
                     is_adj = (a.get('detail5') == 'BALANCE_ADJUSTMENT')
                     prefix = "🔧 " if is_adj else ""
-                    with st.expander(f"{prefix}{a['name']} {format_money(safe_float(a['currentValue']))}"):
+
+                    is_asset_open = (a['id'] == st.session_state.get('expanded_asset_id'))
+                    with st.expander(f"{prefix}{a['name']} {format_money(safe_float(a['currentValue']))}", expanded=is_asset_open):
                         if is_adj: st.info("🔒 자동 계산된 보정 항목입니다.")
-                        else: render_asset_detail(a)
+                        else     : render_asset_detail(a)
     else:
         for a in my_assets:
             val = safe_float(a['currentValue'])
@@ -818,6 +874,7 @@ elif menu in TYPE_LABEL_MAP.values():
             with st.expander(f"{a['name']} {format_money(val)}"):
                 if badges: st.markdown(" ".join(badges), unsafe_allow_html=True)
                 render_asset_detail(a)
+
 
 # -----------------------------------------------------------------------------------------------------
 # 설정

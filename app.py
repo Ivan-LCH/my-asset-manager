@@ -7,6 +7,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import uuid
+import time
 from datetime import datetime, timedelta
 from utils import load_data, save_data
 
@@ -18,21 +19,21 @@ st.set_page_config(page_title="My Asset Manager", page_icon="💰", layout="wide
 PASTEL_COLORS = px.colors.qualitative.Pastel 
 
 COLOR_MAP = {
-    'REAL_ESTATE': PASTEL_COLORS[2], 
-    'STOCK': PASTEL_COLORS[0],       
-    'PENSION': PASTEL_COLORS[4],     
-    'SAVINGS': PASTEL_COLORS[3],     
-    'PHYSICAL': PASTEL_COLORS[5],    
-    'ETC': PASTEL_COLORS[1]          
+    'REAL_ESTATE' : PASTEL_COLORS[2], 
+    'STOCK'       : PASTEL_COLORS[0],       
+    'PENSION'     : PASTEL_COLORS[4],     
+    'SAVINGS'     : PASTEL_COLORS[3],     
+    'PHYSICAL'    : PASTEL_COLORS[5],    
+    'ETC'         : PASTEL_COLORS[1]          
 }
 
 TYPE_LABEL_MAP = {
-    'REAL_ESTATE': '🏠 부동산',
-    'STOCK': '📈 주식',
-    'PENSION': '🛡️ 연금',
-    'SAVINGS': '💰 예적금/현금',
-    'PHYSICAL': '💎 실물자산',
-    'ETC': '🎸 기타'
+    'REAL_ESTATE' : '🏠 부동산',
+    'STOCK'       : '📈 주식',
+    'PENSION'     : '🛡️ 연금',
+    'SAVINGS'     : '💰 예적금/현금',
+    'PHYSICAL'    : '💎 실물자산',
+    'ETC'         : '🎸 기타'
 }
 
 def load_css():
@@ -108,8 +109,8 @@ def display_category_summary(asset_name, assets_subset):
     
     # 화면 표시
     c1, c2, c3 = st.columns(3)
-    with c1: st.markdown(render_kpi_card_html(f"💰 {asset_name} 자산", format_money(cat_total_asset)), unsafe_allow_html=True)
-    with c2: st.markdown(render_kpi_card_html(f"📉 {asset_name} 부채", format_money(cat_total_liab), "#e03131"), unsafe_allow_html=True)
+    with c1: st.markdown(render_kpi_card_html(f"💰 {asset_name} 자산"  , format_money(cat_total_asset)), unsafe_allow_html=True)
+    with c2: st.markdown(render_kpi_card_html(f"📉 {asset_name} 부채"  , format_money(cat_total_liab), "#e03131"), unsafe_allow_html=True)
     with c3: st.markdown(render_kpi_card_html(f"💎 {asset_name} 순자산", format_money(cat_net_worth), "#1c7ed6"), unsafe_allow_html=True)
     
     st.markdown("---")
@@ -125,46 +126,35 @@ def render_kpi_card_html(label, value, color="#212529", sub=""):
     """
 
 def parse_asset_details(asset):
+    """자산 데이터 파싱 (SQLite에서 이미 변환된 데이터를 추가 처리)"""
     a_type = asset.get('type')
     
-    asset['currentValue'] = safe_float(asset.get('currentValue'))
-    asset['acquisitionPrice'] = safe_float(asset.get('acquisitionPrice'))
-    asset['quantity'] = safe_float(asset.get('quantity'))
-    asset['disposalPrice'] = safe_float(asset.get('disposalPrice'))
+    # 숫자 필드 안전 변환
+    asset['currentValue'             ] = safe_float(asset.get('currentValue'))
+    asset['acquisitionPrice'         ] = safe_float(asset.get('acquisitionPrice'))
+    asset['quantity'                 ] = safe_float(asset.get('quantity'))
+    asset['disposalPrice'            ] = safe_float(asset.get('disposalPrice'))
     
+    # 날짜 필드 기본값
     if not asset.get('acquisitionDate'): asset['acquisitionDate'] = ""
-    if not asset.get('disposalDate'): asset['disposalDate'] = ""
+    if not asset.get('disposalDate'   ): asset['disposalDate'   ] = ""
     
+    # 부동산: 숫자 필드 변환
     if a_type == 'REAL_ESTATE':
-        asset['isOwned'] = True if 'OWNED' in str(asset.get('detail1', '')).upper() else False
-        asset['hasTenant'] = True if 'HAS_TENANT' in str(asset.get('detail2', '')).upper() else False
-        asset['tenantDeposit'] = safe_float(asset.get('detail3'))
-        asset['address'] = str(asset.get('detail4', ''))
-        asset['loanAmount'] = safe_float(asset.get('detail5'))
+        asset['tenantDeposit'        ] = safe_float(asset.get('tenantDeposit'))
+        asset['loanAmount'           ] = safe_float(asset.get('loanAmount'))
     
+    # 주식: currentValue 자동 계산
     elif a_type == 'STOCK':
-        asset['accountName'] = str(asset.get('detail1', '기타'))
-        asset['currency'] = str(asset.get('detail2', 'KRW'))
-        if asset['currentValue'] == 0 and asset['quantity'] > 0:
-            asset['currentValue'] = asset['quantity'] * asset['acquisitionPrice']
+        if asset['currentValue'] == 0 and asset['quantity'] > 0:    
+            asset['currentValue'     ] = asset['quantity'] * asset['acquisitionPrice']
 
+    # 연금: 숫자 필드 변환
     elif a_type == 'PENSION':
-        asset['pensionType'] = str(asset.get('detail1', 'PERSONAL'))
-        asset['expectedStartYear'] = safe_int(asset.get('detail2'))
-        asset['expectedMonthlyPayout'] = safe_float(asset.get('detail3'))
-        asset['expectedEndYear'] = safe_int(asset.get('detail4'))
-        asset['annualGrowthRate'] = safe_float(asset.get('detail5', 0))
-        
-    d5 = str(asset.get('detail5', ''))
-    if a_type in ['STOCK', 'SAVINGS'] and (d5 == 'Y' or d5.startswith('PENSION')):
-        asset['isPensionLike'] = True
-        if d5.startswith('PENSION'):
-            try:
-                parts = d5.split('_')
-                if len(parts) >= 3:
-                    asset['expectedStartYear'] = int(parts[1])
-                    asset['expectedMonthlyPayout'] = float(parts[2])
-            except: pass
+        asset['expectedStartYear'    ] = safe_int  (asset.get('expectedStartYear'))
+        asset['expectedMonthlyPayout'] = safe_float(asset.get('expectedMonthlyPayout'))
+        asset['expectedEndYear'      ] = safe_int  (asset.get('expectedEndYear'))
+        asset['annualGrowthRate'     ] = safe_float(asset.get('annualGrowthRate', 0))
 
     return asset
 
@@ -174,7 +164,7 @@ def parse_asset_details(asset):
 def recalculate_account_balance(account_name, target_total=None):
     if not account_name or account_name == "기타": return
 
-    settings = st.session_state.settings
+    settings     = st.session_state.settings
     settings_key = f"ACC_TOTAL_{account_name}"
     
     if target_total is not None:
@@ -185,14 +175,14 @@ def recalculate_account_balance(account_name, target_total=None):
         else:
             return 
 
-    assets = st.session_state.assets
+    assets       = st.session_state.assets
     stock_assets = [a for a in assets if a['type'] == 'STOCK' and a.get('accountName') == account_name]
     
-    adj_asset = next((a for a in stock_assets if a.get('detail5') == 'BALANCE_ADJUSTMENT'), None)
+    adj_asset = next((a for a in stock_assets if a.get('isBalanceAdjustment')), None)
     
     current_sum = 0
     for a in stock_assets:
-        if a.get('detail5') != 'BALANCE_ADJUSTMENT':
+        if not a.get('isBalanceAdjustment'):
             current_sum += safe_float(a['currentValue'])
             
     diff = target_total - current_sum
@@ -215,16 +205,16 @@ def recalculate_account_balance(account_name, target_total=None):
         
     else:
         new_adj = {
-            "id": str(uuid.uuid4()),
-            "type": "STOCK",
-            "name": f"[보정] {account_name}",
-            "accountName": account_name,
-            "currentValue": diff,
-            "acquisitionPrice": 0,
-            "quantity": 1,
-            "acquisitionDate": today,
-            "detail5": "BALANCE_ADJUSTMENT",
-            "history": [{"date": today, "value": diff, "price": diff, "quantity": 1}]
+            "id"                  : str(uuid.uuid4()),
+            "type"                : "STOCK",
+            "name"                : f"[보정] {account_name}",
+            "accountName"         : account_name,
+            "currentValue"        : diff,
+            "acquisitionPrice"    : 0,
+            "quantity"            : 1,
+            "acquisitionDate"     : today,
+            "isBalanceAdjustment" : True,
+            "history"             : [{"date": today, "value": diff, "price": diff, "quantity": 1}]
         }
         st.session_state.assets.append(new_adj)
 
@@ -273,7 +263,7 @@ def generate_history_df(assets, type_filter=None):
         init_val = safe_float(a.get('acquisitionPrice', 0))
         if is_qty_based:
             qty = safe_float(a.get('quantity', 0))
-            if qty == 0 and a.get('detail5') == 'BALANCE_ADJUSTMENT': qty = 1
+            if qty == 0 and a.get('isBalanceAdjustment'): qty = 1
             if qty > 0: init_val = init_val * qty
 
         val_map[acq_date] = init_val
@@ -291,9 +281,10 @@ def generate_history_df(assets, type_filter=None):
                 try:
                     d = datetime.strptime(h['date'], "%Y-%m-%d")
                     v = 0
-                    if 'value' in h: 
+                    # value가 있고 None이 아니면 사용, 아니면 price*quantity 계산
+                    if h.get('value') is not None:
                         v = safe_float(h['value'])
-                    elif 'price' in h and 'quantity' in h: 
+                    elif h.get('price') is not None and h.get('quantity') is not None:
                         v = safe_float(h['price']) * safe_float(h['quantity'])
                     val_map[d] = v
                 except: pass
@@ -322,11 +313,11 @@ def generate_history_df(assets, type_filter=None):
                     chart_val = max(0, chart_val - liab)
             
             rows.append({
-                'date': d.strftime("%Y-%m-%d"),
-                'value': chart_val,
-                'name': a['name'],
-                'type': a['type'],
-                'account': a.get('accountName', '기타')
+                'date'    : d.strftime("%Y-%m-%d"),
+                'value'   : chart_val,
+                'name'    : a['name'],
+                'type'    : a['type'],
+                'account' : a.get('accountName', '기타')
             })
             
     return pd.DataFrame(rows)
@@ -337,7 +328,7 @@ def generate_history_df(assets, type_filter=None):
 # -----------------------------------------------------------------------------------------------------
 def render_asset_detail(asset):
     a_type       = asset['type']
-    is_adj       = (a_type == 'STOCK' and asset.get('detail5') == 'BALANCE_ADJUSTMENT')
+    is_adj       = (a_type == 'STOCK' and asset.get('isBalanceAdjustment'))
     # [수정] 수량 기반 자산 여부 (주식 + 실물)
     is_qty_based = a_type in ['STOCK', 'PHYSICAL']
     
@@ -574,8 +565,22 @@ def render_asset_detail(asset):
                 if a_type == 'PENSION':
                     e_mon_pay = c4.number_input("월 수령액(원)", value=safe_float(asset.get('expectedMonthlyPayout', 0)))
                     e_growth = c3.number_input("매년 증가율(%)", value=safe_float(asset.get('annualGrowthRate', 0)))
+                    e_mon_pay = c4.number_input("월 수령액(원)", value=safe_float(asset.get('expectedMonthlyPayout', 0)))
+                    e_growth = c3.number_input("매년 증가율(%)", value=safe_float(asset.get('annualGrowthRate', 0)))
 
-                st.caption("매각 처리")
+                e_ticker = ""
+                if a_type == 'STOCK':
+                    st.caption("자동 업데이트 설정")
+                    col_t1, col_t2 = st.columns([3, 1])
+                    curr_ticker = asset.get('ticker') or ""
+                    
+                    e_ticker = col_t1.text_input("Ticker (Yahoo Finance)", value=curr_ticker, 
+                                               placeholder="예: 005930.KS, TSLA, AAPL")
+                    
+                    # 검색 링크 제공 (Form 내부 버튼 사용 불가로 링크만 제공)
+                    search_query = f"{asset['name']} ticker yahoo finance"
+                    search_url = f"https://www.google.com/search?q={search_query}"
+                    col_t2.markdown(f"<br><a href='{search_url}' target='_blank'>🔍 검색</a>", unsafe_allow_html=True)
                 c_d1, c_d2 = st.columns(2)
                 e_disp_d = c_d1.text_input("매각일 (YYYY-MM-DD)", value=disp_date)
                 e_disp_p = c_d2.number_input("매각금액", value=disp_price)
@@ -599,6 +604,18 @@ def render_asset_detail(asset):
                         asset['expectedMonthlyPayout'] = e_mon_pay
                         asset['detail5'              ] = e_growth
                         asset['annualGrowthRate'     ] = e_growth
+                    
+                    if a_type == 'STOCK':
+                        asset['ticker'] = e_ticker
+                        # [편의 기능] 동일한 이름을 가진 다른 주식 자산도 Ticker 일괄 적용
+                        if e_ticker:
+                            sync_cnt = 0
+                            for a in st.session_state.assets:
+                                if a['type'] == 'STOCK' and a['name'] == asset['name'] and a['id'] != asset['id']:
+                                    a['ticker'] = e_ticker
+                                    sync_cnt += 1
+                            if sync_cnt > 0:
+                                st.toast(f"ℹ️ 동일한 이름의 자산 {sync_cnt}개에도 Ticker가 적용되었습니다.")
 
                     st.success("저장됨")
                     st.rerun()
@@ -645,36 +662,26 @@ with st.sidebar:
     menu = st.radio("메뉴 이동", menu_items)
     
     st.markdown("---")
-    if st.button("🔄 새로고침"):
-        st.cache_data.clear()
-        data, config = load_data()
-        st.session_state.assets = [parse_asset_details(a) for a in data]
-        st.rerun()
+    st.markdown("---")
+    
+    # 버튼을 한 줄에 배치하고 너비를 꽉 채움
+    col_sb1, col_sb2 = st.columns(2)
+    
+    with col_sb1:
+        if st.button("🔄 새로고침", use_container_width=True):
+            st.cache_data.clear()
+            data, config = load_data()
+            st.session_state.settings = config
+            st.session_state.assets = [parse_asset_details(a) for a in data]
+            st.rerun()
 
-    if st.button("💾 저장하기", type="primary"):
-        to_save = []
-        for a in st.session_state.assets:
-            copy_a = a.copy()
-            if a['type'] == 'REAL_ESTATE':
-                copy_a['detail1'] = 'OWNED' if a.get('isOwned') else 'RENTED'
-                copy_a['detail2'] = 'HAS_TENANT' if a.get('hasTenant') else 'NO_TENANT'
-                copy_a['detail3'] = a.get('tenantDeposit')
-                copy_a['detail4'] = a.get('address')
-                copy_a['detail5'] = a.get('loanAmount')
-            elif a['type'] == 'STOCK':
-                copy_a['detail1'] = a.get('accountName')
-                copy_a['detail2'] = a.get('currency')
-            elif a['type'] == 'PENSION':
-                copy_a['detail1'] = a.get('pensionType')
-                copy_a['detail2'] = a.get('expectedStartYear')
-                copy_a['detail3'] = a.get('expectedMonthlyPayout')
-                copy_a['detail4'] = a.get('expectedEndYear')
-                copy_a['detail5'] = a.get('annualGrowthRate')
-            to_save.append(copy_a)
-        if save_data(to_save, st.session_state.settings):
-            st.success("저장되었습니다.")
-        else:
-            st.error("저장 실패")
+    with col_sb2:
+        if st.button("💾 저장하기", type="primary", use_container_width=True):
+            # SQLite로 직접 저장 (필드 변환 필요 없음)
+            if save_data(st.session_state.assets, st.session_state.settings):
+                st.success("저장됨")
+            else:
+                st.error("실패")
 
 # -----------------------------------------------------------------------------------------------------
 # 1. 대시보드
@@ -695,7 +702,7 @@ if menu == "📊 대시보드":
     c1, c2, c3 = st.columns(3)
     with c1: st.markdown(render_kpi_card_html("💰 총 자산", format_money(total_asset)), unsafe_allow_html=True)
     with c2: st.markdown(render_kpi_card_html("📉 총 부채", format_money(total_liab), "#e03131"), unsafe_allow_html=True)
-    with c3: st.markdown(render_kpi_card_html("💎 순자산", format_money(net_worth), "#1c7ed6"), unsafe_allow_html=True)
+    with c3: st.markdown(render_kpi_card_html("💎 순자산" , format_money(net_worth), "#1c7ed6"), unsafe_allow_html=True)
     
     st.divider()
     if assets:
@@ -733,11 +740,33 @@ if menu == "📊 대시보드":
 # -----------------------------------------------------------------------------------------------------
 elif menu in TYPE_LABEL_MAP.values():
     target_type = [k for k, v in TYPE_LABEL_MAP.items() if v == menu][0]
-    st.title(menu)
     
-    view_mode = "계좌별 보기"
     if target_type == 'STOCK':
+        col_h1, col_h2 = st.columns([3, 1])
+        with col_h1:
+            st.title(menu)
+        with col_h2:
+            st.markdown('<div style="height: 15px;"></div>', unsafe_allow_html=True)
+            if st.button("📈 주가 업데이트", key="btn_stock_upd", type="primary", use_container_width=True):
+                with st.spinner("시세 정보를 가져오는 중입니다..."):
+                    try:
+                        import stock_updater
+                        count = stock_updater.update_all_stocks()
+                        if count > 0:
+                            st.success(f"{count}개 종목 업데이트 완료!")
+                        else:
+                            st.warning("업데이트된 종목이 없습니다. (Ticker 설정을 확인하세요)")
+                        time.sleep(1)
+                        st.rerun()
+                    except ImportError:
+                        st.error("yfinance 모듈 미설치")
+                    except Exception as e:
+                        st.error(f"오류: {e}")
+
         view_mode = st.radio("보기 모드", ["계좌별 보기", "종목별 보기"], horizontal=True)
+    else:
+        st.title(menu)
+        view_mode = "계좌별 보기"
     
     my_assets = [a for a in assets if a['type'] == target_type]
     
@@ -747,6 +776,16 @@ elif menu in TYPE_LABEL_MAP.values():
         # [수정] 상단 차트도 자산 유형별 기간(3년/10년) 적용
         df_hist = generate_history_df(my_assets, target_type)
         if not df_hist.empty:
+            
+            # [UI Improvement] 차트 기간 선택
+            if target_type == 'STOCK':
+                c_period, _ = st.columns([1, 3])
+                period_opt = c_period.radio("차트 기간", ["전체", "최근 30일"], horizontal=True, label_visibility="collapsed")
+                
+                if period_opt == "최근 30일":
+                    limit_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+                    df_hist = df_hist[df_hist['date'] >= limit_date]
+
             df_hist['value_man'] = df_hist['value'] / 10000
             
             if target_type == 'STOCK' and view_mode == "계좌별 보기":
@@ -840,7 +879,7 @@ elif menu in TYPE_LABEL_MAP.values():
         for acc in accounts:
             acc_assets = [a for a in my_assets if a.get('accountName') == acc]
             
-            pure_stock_sum = sum([safe_float(a['currentValue']) for a in acc_assets if a.get('detail5') != 'BALANCE_ADJUSTMENT'])
+            pure_stock_sum = sum([safe_float(a['currentValue']) for a in acc_assets if not a.get('isBalanceAdjustment')])
             total_with_adj = sum([safe_float(a['currentValue']) for a in acc_assets])
             current_target = st.session_state.settings.get(f"ACC_TOTAL_{acc}", total_with_adj)
 
@@ -858,22 +897,52 @@ elif menu in TYPE_LABEL_MAP.values():
                 
                 st.markdown("---")
                 for a in acc_assets:
-                    is_adj = (a.get('detail5') == 'BALANCE_ADJUSTMENT')
+                    is_adj = a.get('isBalanceAdjustment')
                     prefix = "🔧 " if is_adj else ""
+                    
+                    val = safe_float(a['currentValue'])
+                    qty = safe_float(a.get('quantity', 0))
+                    
+                    # [UI Revert & Improve] Expander Label with Quantity
+                    # "종목명 (수량) : 금액" 형식
+                    label = f"{prefix}{a['name']}"
+                    if not is_adj and qty > 0:
+                        label += f" ({qty:,.0f}주)"
+                    label += f" : {format_money(val)}"
+                    
+                    if a.get('disposalDate'): label += " (🔴매각)"
 
                     is_asset_open = (a['id'] == st.session_state.get('expanded_asset_id'))
-                    with st.expander(f"{prefix}{a['name']} {format_money(safe_float(a['currentValue']))}", expanded=is_asset_open):
+                    with st.expander(label, expanded=is_asset_open):
                         if is_adj: st.info("🔒 자동 계산된 보정 항목입니다.")
                         else     : render_asset_detail(a)
     else:
-        for a in my_assets:
-            val = safe_float(a['currentValue'])
-            badges = []
-            if a.get('disposalDate'): badges.append('<span class="badge badge-red">매각됨</span>')
-            
-            with st.expander(f"{a['name']} {format_money(val)}"):
-                if badges: st.markdown(" ".join(badges), unsafe_allow_html=True)
-                render_asset_detail(a)
+        # 종목별 보기 (Stock View Only)
+        if target_type == 'STOCK':
+             for a in my_assets:
+                val = safe_float(a['currentValue'])
+                qty = safe_float(a.get('quantity', 0))
+                
+                label = f"{a['name']}"
+                if qty > 0:
+                    label += f" ({qty:,.0f}주)"
+                label += f" : {format_money(val)}"
+                
+                if a.get('disposalDate'): label += " (🔴매각)"
+                
+                with st.expander(label):
+                    render_asset_detail(a)
+        else:
+            # Other types (Real Estate, etc)
+            for a in my_assets:
+                val = safe_float(a['currentValue'])
+                badges = []
+                if a.get('disposalDate'): badges.append('<span class="badge badge-red">매각됨</span>')
+                
+                with st.expander(f"{a['name']} {format_money(val)}"):
+                    if badges: st.markdown(" ".join(badges), unsafe_allow_html=True)
+                    render_asset_detail(a)
+
 
 
 # -----------------------------------------------------------------------------------------------------

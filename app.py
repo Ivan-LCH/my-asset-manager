@@ -562,6 +562,19 @@ def render_asset_detail(asset, precalc_df=None):
                     st.session_state.settings = config
                     st.session_state.assets   = [parse_asset_details(a) for a in data]
                     st.rerun()
+            
+            # [이력 삭제 버튼] - form 밖에서 처리
+            st.markdown("---")
+            if st.button("🗑️ 이 날짜 삭제", key=f"del_hist_{asset['id']}_{e_date}", type="secondary"):
+                from database import get_connection
+                with get_connection() as conn:
+                    conn.execute("DELETE FROM asset_history WHERE asset_id = ? AND date = ?", (asset['id'], e_date))
+                st.toast(f"{e_date} 데이터가 삭제되었습니다.")
+                st.cache_data.clear()
+                data, config              = load_data()
+                st.session_state.settings = config
+                st.session_state.assets   = [parse_asset_details(a) for a in data]
+                st.rerun()
         
         else:
             # [신규 추가 모드]
@@ -579,119 +592,128 @@ def render_asset_detail(asset, precalc_df=None):
                     st.session_state['expanded_account' ] = asset.get('accountName') 
 
                     d_str = n_date.strftime("%Y-%m-%d")
-                    from database import update_history_and_future_quantities, insert_history
                     
-                    if is_qty_based:
-                        update_history_and_future_quantities(asset['id'], d_str, n_p, n_q)
+                    # [Validation] 매각일 이후에는 이력 추가 불가
+                    disp_date_str = asset.get('disposalDate', '')
+                    if disp_date_str and d_str > disp_date_str:
+                        st.error(f"⚠️ 매각일({disp_date_str}) 이후에는 이력을 추가할 수 없습니다.")
                     else:
-                        insert_history(asset['id'], {"date": d_str, "value": n_v})
-                    
-                    st.success("추가됨")
-                    # [UI Refresh] 데이터 다시 로드
-                    st.cache_data.clear()
-                    data, config             = load_data()
-                    st.session_state.settings = config
-                    st.session_state.assets   = [parse_asset_details(a) for a in data]
-                    st.rerun()
+                        from database import update_history_and_future_quantities, insert_history
+                        
+                        if is_qty_based:
+                            update_history_and_future_quantities(asset['id'], d_str, n_p, n_q)
+                        else:
+                            insert_history(asset['id'], {"date": d_str, "value": n_v})
+                        
+                        st.success("추가됨")
+                        # [UI Refresh] 데이터 다시 로드
+                        st.cache_data.clear()
+                        data, config             = load_data()
+                        st.session_state.settings = config
+                        st.session_state.assets   = [parse_asset_details(a) for a in data]
+                        st.rerun()
+
+    # [속성 수정] 전체 너비로 표시 (c_right 컬럼 밖으로 이동)
+    st.markdown("---")
+    with st.expander("🛠️ 속성 수정 (대출, 보증금, 매각 등)"):
+        with st.form(f"meta_{asset['id']}"):
+            c1, c2  = st.columns(2)
+            e_name  = c1.text_input("자산명", value=asset['name'], key=f"name_{asset['id']}")
+            e_acq_d = c2.text_input("취득일", value=acq_date, key=f"acq_d_{asset['id']}")
+            c3, c4  = st.columns(2)
+            e_acq_p = c3.number_input("취득가", value=acq_price, key=f"acq_p_{asset['id']}")
+            
+            e_addr, e_loan, e_dep = "", 0, 0
+            if a_type == 'REAL_ESTATE':
+                e_addr = c4.text_input("주소", value=asset.get('address', ''), key=f"addr_{asset['id']}")
+                c5, c6 = st.columns(2)
+                e_loan = c5.number_input("대출금", value=safe_float(asset.get('loanAmount', 0)), key=f"loan_{asset['id']}")
+                e_dep  = c6.number_input("보증금", value=safe_float(asset.get('tenantDeposit', 0)), key=f"dep_{asset['id']}")
+            
+            e_mon_pay = 0
+            e_growth  = 0
+            if a_type == 'PENSION':
+                e_mon_pay = c4.number_input("월 수령액(원)", value=safe_float(asset.get('expectedMonthlyPayout', 0)), key=f"mon_pay_{asset['id']}")
+                e_growth  = c3.number_input("매년 증가율(%)", value=safe_float(asset.get('annualGrowthRate', 0)), key=f"growth_{asset['id']}")
+
+            e_ticker = ""
+            if a_type == 'STOCK':
+                st.caption("자동 업데이트 설정")
+                col_t1, col_t2 = st.columns([3, 1])
+                curr_ticker = asset.get('ticker') or ""
+                
+                e_ticker = col_t1.text_input(
+                    "Ticker (Yahoo Finance)", 
+                    value       = curr_ticker, 
+                    placeholder = "예: 005930.KS, TSLA, AAPL"
+                )
+                
+                # 검색 링크 제공 (Form 내부 버튼 사용 불가로 링크만 제공)
+                search_query = f"{asset['name']} ticker yahoo finance"
+                search_url   = f"https://www.google.com/search?q={search_query}"
+                col_t2.markdown(
+                    f"<br><a href='{search_url}' target='_blank'>🔍 검색</a>", 
+                    unsafe_allow_html=True
+                )
+            c_d1, c_d2 = st.columns(2)
+            e_disp_d   = c_d1.text_input  ("매각일 (YYYY-MM-DD)", value=disp_date, key=f"disp_d_{asset['id']}")
+            e_disp_p   = c_d2.number_input("매각금액", value=disp_price, key=f"disp_p_{asset['id']}")
+            
+            if st.form_submit_button("속성 저장"):
+                st.session_state['expanded_asset_id'] = asset['id']
+                st.session_state['expanded_account' ] = asset.get('accountName') 
+
+                asset['name'            ] = e_name
+                asset['acquisitionDate' ] = e_acq_d
+                asset['acquisitionPrice'] = e_acq_p
+                asset['disposalDate'    ] = e_disp_d
+                asset['disposalPrice'   ] = e_disp_p
+                
+                if a_type == 'REAL_ESTATE':
+                    asset['address'              ] = e_addr
+                    asset['loanAmount'           ] = e_loan
+                    asset['tenantDeposit'        ] = e_dep
+                
+                if a_type == 'PENSION':
+                    asset['expectedMonthlyPayout'] = e_mon_pay
+                    asset['detail5'              ] = e_growth
+                    asset['annualGrowthRate'     ] = e_growth
+                
+                if a_type == 'STOCK':
+                    asset['ticker'] = e_ticker
+                    # [편의 기능] 동일한 이름을 가진 다른 주식 자산도 Ticker 일괄 적용
+                    if e_ticker:
+                        sync_cnt = 0
+                        for a in st.session_state.assets:
+                            if a['type'] == 'STOCK' and a['name'] == asset['name'] and a['id'] != asset['id']:
+                                a['ticker'] = e_ticker
+                                sync_cnt   += 1
+                        if sync_cnt > 0:
+                            st.toast(f"ℹ️ 동일한 이름의 자산 {sync_cnt}개에도 Ticker가 적용되었습니다.")
+
+                st.success("저장됨")
+                st.rerun()
 
         st.markdown("---")
-        with st.expander("🛠️ 속성 수정 (대출, 보증금, 매각 등)"):
-            with st.form(f"meta_{asset['id']}"):
-                c1, c2  = st.columns(2)
-                e_name  = c1.text_input("자산명", value=asset['name'], key=f"name_{asset['id']}")
-                e_acq_d = c2.text_input("취득일", value=acq_date, key=f"acq_d_{asset['id']}")
-                c3, c4  = st.columns(2)
-                e_acq_p = c3.number_input("취득가", value=acq_price, key=f"acq_p_{asset['id']}")
+        # 폼(form) 밖에서 버튼을 만들어야 바로 동작합니다.
+        col_del_1, col_del_2 = st.columns([4, 1])
+        with col_del_2:
+            if st.button(
+                "🗑️ 삭제", 
+                key    = f"del_btn_{asset['id']}", 
+                type   = "primary", 
+                help   = "이 자산을 영구적으로 삭제합니다."
+            ):
+                st.session_state['expanded_account'] = asset.get('accountName')                        
+                # 1. 자산 리스트에서 해당 ID를 가진 항목 제외 (삭제)
+                st.session_state.assets = [a for a in st.session_state.assets if a['id'] != asset['id']]
                 
-                e_addr, e_loan, e_dep = "", 0, 0
-                if a_type == 'REAL_ESTATE':
-                    e_addr = c4.text_input("주소", value=asset.get('address', ''), key=f"addr_{asset['id']}")
-                    c5, c6 = st.columns(2)
-                    e_loan = c5.number_input("대출금", value=safe_float(asset.get('loanAmount', 0)), key=f"loan_{asset['id']}")
-                    e_dep  = c6.number_input("보증금", value=safe_float(asset.get('tenantDeposit', 0)), key=f"dep_{asset['id']}")
-                
-                e_mon_pay = 0
-                e_growth  = 0
-                if a_type == 'PENSION':
-                    e_mon_pay = c4.number_input("월 수령액(원)", value=safe_float(asset.get('expectedMonthlyPayout', 0)), key=f"mon_pay_{asset['id']}")
-                    e_growth  = c3.number_input("매년 증가율(%)", value=safe_float(asset.get('annualGrowthRate', 0)), key=f"growth_{asset['id']}")
-
-                e_ticker = ""
-                if a_type == 'STOCK':
-                    st.caption("자동 업데이트 설정")
-                    col_t1, col_t2 = st.columns([3, 1])
-                    curr_ticker = asset.get('ticker') or ""
+                # 2. DB에서도 삭제
+                from database import delete_asset
+                delete_asset(asset['id'])
                     
-                    e_ticker = col_t1.text_input(
-                        "Ticker (Yahoo Finance)", 
-                        value       = curr_ticker, 
-                        placeholder = "예: 005930.KS, TSLA, AAPL"
-                    )
-                    
-                    # 검색 링크 제공 (Form 내부 버튼 사용 불가로 링크만 제공)
-                    search_query = f"{asset['name']} ticker yahoo finance"
-                    search_url   = f"https://www.google.com/search?q={search_query}"
-                    col_t2.markdown(
-                        f"<br><a href='{search_url}' target='_blank'>🔍 검색</a>", 
-                        unsafe_allow_html=True
-                    )
-                c_d1, c_d2 = st.columns(2)
-                e_disp_d   = c_d1.text_input  ("매각일 (YYYY-MM-DD)", value=disp_date, key=f"disp_d_{asset['id']}")
-                e_disp_p   = c_d2.number_input("매각금액", value=disp_price, key=f"disp_p_{asset['id']}")
-                
-                if st.form_submit_button("속성 저장"):
-                    st.session_state['expanded_asset_id'] = asset['id']
-                    st.session_state['expanded_account' ] = asset.get('accountName') 
-
-                    asset['name'            ] = e_name
-                    asset['acquisitionDate' ] = e_acq_d
-                    asset['acquisitionPrice'] = e_acq_p
-                    asset['disposalDate'    ] = e_disp_d
-                    asset['disposalPrice'   ] = e_disp_p
-                    
-                    if a_type == 'REAL_ESTATE':
-                        asset['address'              ] = e_addr
-                        asset['loanAmount'           ] = e_loan
-                        asset['tenantDeposit'        ] = e_dep
-                    
-                    if a_type == 'PENSION':
-                        asset['expectedMonthlyPayout'] = e_mon_pay
-                        asset['detail5'              ] = e_growth
-                        asset['annualGrowthRate'     ] = e_growth
-                    
-                    if a_type == 'STOCK':
-                        asset['ticker'] = e_ticker
-                        # [편의 기능] 동일한 이름을 가진 다른 주식 자산도 Ticker 일괄 적용
-                        if e_ticker:
-                            sync_cnt = 0
-                            for a in st.session_state.assets:
-                                if a['type'] == 'STOCK' and a['name'] == asset['name'] and a['id'] != asset['id']:
-                                    a['ticker'] = e_ticker
-                                    sync_cnt   += 1
-                            if sync_cnt > 0:
-                                st.toast(f"ℹ️ 동일한 이름의 자산 {sync_cnt}개에도 Ticker가 적용되었습니다.")
-
-                    st.success("저장됨")
-                    st.rerun()
-
-            st.markdown("---")
-            # 폼(form) 밖에서 버튼을 만들어야 바로 동작합니다.
-            col_del_1, col_del_2 = st.columns([4, 1])
-            with col_del_2:
-                if st.button(
-                    "🗑️ 삭제", 
-                        key    = f"del_btn_{asset['id']}", 
-                        type   = "primary", 
-                        help   = "이 자산을 영구적으로 삭제합니다."
-                    ):
-                        st.session_state['expanded_account'] = asset.get('accountName')                        
-                        # 1. 자산 리스트에서 해당 ID를 가진 항목 제외 (삭제)
-                        st.session_state.assets = [a for a in st.session_state.assets if a['id'] != asset['id']]
-                        
-                        # 2. 주식일 경우, 계좌 총액 잔고 재계산 (제거됨)
-                            
-                        st.toast("자산이 삭제되었습니다.")
-                        st.rerun()                    
+                st.toast("자산이 삭제되었습니다.")
+                st.rerun()                    
 
 
 # -----------------------------------------------------------------------------------------------------
@@ -791,13 +813,23 @@ if menu == "📊 대시보드":
                 df_hist['value_man'] = df_hist['value'] / 10000
                 df_area = df_hist.groupby(['date', 'type'])['value_man'].sum().reset_index()
                 df_area['label'] = df_area['type'].map(TYPE_LABEL_MAP)
+                # 날짜별 합계 계산
+                df_totals = df_area.groupby('date')['value_man'].sum().to_dict()
+                df_area['total'] = df_area['date'].map(df_totals)
+                
                 fig_area = px.area(
                     df_area,
                     x                  = 'date',
                     y                  = 'value_man',
                     color              = 'label',
                     color_discrete_map = {v: COLOR_MAP[k] for k, v in TYPE_LABEL_MAP.items()},
-                    labels             = {'value_man': '가치(만원)'}
+                    labels             = {'value_man': '가치(만원)'},
+                    custom_data        = ['label', 'total']
+                )
+                
+                # 커스텀 hover 템플릿: 항목명 - 금액(만원)
+                fig_area.update_traces(
+                    hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
                 )
                 
                 # [수정] 대시보드 차트도 가독성 개선
@@ -895,22 +927,41 @@ elif menu in TYPE_LABEL_MAP.values():
                 # 기존: 누계(Stack) 차트
                 if target_type == 'STOCK' and view_mode == "계좌별 보기":
                     df_chart_grp = df_hist.groupby(['date', 'account'])['value_man'].sum().reset_index()
+                    # 날짜별 합계 계산
+                    df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
+                    df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
+                    
                     fig = px.area(
                         df_chart_grp, 
                         x                       = 'date', 
                         y                       = 'value_man', 
                         color                   = 'account', 
                         color_discrete_sequence = PASTEL_COLORS, 
-                        labels                  = {'value_man': '가치(만원)'}
+                        labels                  = {'value_man': '가치(만원)'},
+                        custom_data             = ['account', 'total']
+                    )
+                    # 커스텀 hover 템플릿: 항목명 - 금액(만원)
+                    fig.update_traces(
+                        hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
                     )
                 else:
+                    df_chart_grp = df_hist.groupby(['date', 'name'])['value_man'].sum().reset_index()
+                    # 날짜별 합계 계산
+                    df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
+                    df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
+                    
                     fig = px.area(
-                        df_hist, 
+                        df_chart_grp, 
                         x                       = 'date', 
                         y                       = 'value_man', 
                         color                   = 'name', 
                         color_discrete_sequence = PASTEL_COLORS, 
-                        labels                  = {'value_man': '가치(만원)'}
+                        labels                  = {'value_man': '가치(만원)'},
+                        custom_data             = ['name', 'total']
+                    )
+                    # 커스텀 hover 템플릿: 항목명 - 금액(만원)
+                    fig.update_traces(
+                        hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
                     )
                 
                 fig.update_layout(

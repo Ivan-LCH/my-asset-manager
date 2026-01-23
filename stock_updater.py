@@ -44,7 +44,7 @@ def get_exchange_rate(currency='USD') -> float:
 # 주가 업데이트 로직
 # -----------------------------------------------------------------------------------------------------
 def update_all_stocks():
-    """DB의 모든 주식 자산에 대해 시세 업데이트"""
+    """DB의 모든 주식 자산에 대해 시세 업데이트 (Safe Update)"""
     print("🚀 주식 시세 업데이트 시작...")
     
     with get_connection() as conn:
@@ -90,42 +90,34 @@ def update_all_stocks():
                     # 기록이 아예 없으면 30일 전부터
                     start_date_candidates.append(today - timedelta(days=30))
                 else:
-                    # 기록이 있으면 그 다음 날부터
+                    # 기록이 있으면 [마지막 날짜] 부터 다시 조회 (Overlap Update)
+                    # 그래야 마지막 날짜의 단가(장중/미완성)를 최신으로 보정할 수 있음
                     d = datetime.strptime(last_db_date, "%Y-%m-%d")
-                    start_date_candidates.append(d + timedelta(days=1))
+                    start_date_candidates.append(d)
             
-            # 가장 과거의 날짜 채택 (단, 오늘보다 미래면 패스)
-            min_start_date = min(start_date_candidates)
-            if min_start_date >= today:
-                # 이미 최신임, 오늘 현재가만 가져오면 됨
-                fetch_start = None
-                print(f"   ℹ️ 최신 데이터 보유 중. 현재가만 갱신.")
-            else:
-                fetch_start = min_start_date
-                print(f"   📥 과거 데이터 다운로드 시작 (from {fetch_start.strftime('%Y-%m-%d')})")
+            # 가장 과거의 날짜 채택
+            # 최소 시작일이 오늘보다 미래라면, 데이터가 이미 최신인 상태지만
+            # 장중 업데이트를 고려해 오늘 데이터는 다시 가져오는 것이 좋음
+            fetch_start = min(start_date_candidates)
+            print(f"   📥 데이터 확인 기간: {fetch_start.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}")
 
             # (2) 데이터 다운로드
             yf_ticker = yf.Ticker(ticker)
             
-            # 현재가용
+            # 현재가 (Current Price) - 항상 가져옴
             current_price = 0
             try:
                 current_price = yf_ticker.fast_info.get('last_price')
             except: pass
             
-            # 과거 데이터 (Backfill)
-            hist_data = None
-            if fetch_start:
-                # end는 exclusive이므로 오늘(포함 안됨)까지 하면 어제 데이터까지 옴
-                # 하지만 장중이라면 오늘 데이터도 포함될 수 있음.
-                hist_data = yf_ticker.history(start=fetch_start, end=today + timedelta(days=1))
+            # 히스토리 데이터 다운로드 (Start ~ Today+1)
+            hist_data = yf_ticker.history(start=fetch_start, end=today + timedelta(days=1), auto_adjust=True)
                 
-            # 만약 current_price를 못 구했으면 hist 데이터나 최근 5일 데이터에서 조회
+            # 만약 current_price를 못 구했으면 hist 데이터에서 조회
             if (current_price == 0 or current_price is None):
-                if hist_data is not None and not hist_data.empty:
+                if not hist_data.empty:
                      current_price = hist_data['Close'].iloc[-1]
                 else:
-                    # 백필이 필요없는 경우에도 현재가를 못 구했으면 최근 데이터를 조회
                     try:
                         temp_hist = yf_ticker.history(period="5d")
                         if not temp_hist.empty:
@@ -140,106 +132,70 @@ def update_all_stocks():
             currency = asset_list[0]['currency'] 
             rate     = get_exchange_rate(currency)
             
-            # (3) 처리 및 저장
+            # (3) 처리 및 저장 (Safe Logic)
             for asset in asset_list:
-                qty = float(asset['quantity'])
-                if qty == 0: continue
+                # DB의 "마지막 수량"을 가져옴 (Forward Fill용)
+                last_qty = float(asset['quantity']) 
+                # 하지만, 더 정확하게는 히스토리상 '마지막 날짜의 수량'을 가져와야 함.
+                # 왜냐하면 asset['quantity']는 현재 수량인데, 이게 과거 데이터에는 적용되면 안될 수도 있지만
+                # 여기서는 'Gap Filling'이므로 가장 최신 상태를 이어받는 것이 맞음.
                 
-                # ---------------------------------------------------------------------------------
-                # [Smart Update] 수량이 변경되었는지 확인 (마지막 히스토리의 수량 vs 현재 수량)
-                # 수량이 달라졌다면, 과거 히스토리가 현재 수량과 맞지 않게 되므로
-                # 2023-01-01 부터의 데이터를 전부 다시 계산해서 덮어씀 (Backfill/Rewrite Logic)
-                # ---------------------------------------------------------------------------------
-                try:
-                    need_rewrite = False
-                    with get_connection() as conn:
-                        lh = conn.execute("SELECT quantity FROM asset_history WHERE asset_id = ? ORDER BY date DESC LIMIT 1", (asset['id'],)).fetchone()
-                        if lh:
-                             last_hist_qty = float(lh[0])
-                             if last_hist_qty != qty: need_rewrite = True
+                # 안전 로직: 기존 히스토리를 절대 삭제하지 않음.
+                # 날짜별로 DB에 존재하는지 확인 후, 존재하면 Price Update, 없으면 Insert
+                
+                if not hist_data.empty:
+                    # 일괄 처리를 위해 DB 조회를 최소화하고 싶지만, 
+                    # 안전을 위해 날짜별로 INSERT or UPDATE 수행
                     
-                    if need_rewrite:
-                        print(f"      🔄 수량 변경 감지 ({last_hist_qty} -> {qty}). 전체 히스토리 재계산 진행...")
+                    for ts, row in hist_data.iterrows():
+                        r_date = ts.to_pydatetime().replace(tzinfo=None)
+                        r_date_str = r_date.strftime("%Y-%m-%d")
                         
-                        # 1. 기존 히스토리 삭제 (2023년 이후)
+                        h_price = row['Close']
+                        
+                        # 해당 날짜의 기록이 있는지 확인
                         with get_connection() as conn:
-                             conn.execute("DELETE FROM asset_history WHERE asset_id = ? AND date >= '2023-01-01'", (asset['id'],))
-                        
-                        # 2. yfinance 데이터 다시 가져오기 (월단위 전체)
-                        full_hist = yf_ticker.history(start="2023-01-01", interval="1mo", auto_adjust=True)
-                        if not full_hist.empty:
-                             # 취득일 파싱
-                             acq_date_str = asset.get('acquisition_date')
-                             acq_date     = None
-                             if acq_date_str:
-                                 try: acq_date = datetime.strptime(acq_date_str[:10], "%Y-%m-%d")
-                                 except: pass
-                                 
-                             bf_records = []
-                             for ts, row in full_hist.iterrows():
-                                 r_date     = ts.to_pydatetime().replace(tzinfo=None)
-                                 r_date_str = r_date.strftime("%Y-%m-%d")
-                                 
-                                 # 수량 결정 (취득일 전이면 0)
-                                 r_qty = qty
-                                 if acq_date and r_date < acq_date: r_qty = 0
-                                 
-                                 # 가격 및 가치 계산
-                                 r_price    = row['Close']
-                                 r_val      = r_price * r_qty * rate
-                                 
-                                 bf_records.append({
-                                     'date'    : r_date_str, 
-                                     'price'   : r_price, 
-                                     'quantity': r_qty, 
-                                     'value'   : r_val
-                                 })
-                             
-                             if bf_records:
-                                 insert_history_batch(asset['id'], bf_records)
-                                 print(f"      ✅ 히스토리 {len(bf_records)}건 재작성 완료.")
-
-                except Exception as e:
-                    print(f"      ⚠️ 재계산 실패: {e}")
+                            exist_row = conn.execute(
+                                "SELECT id, quantity FROM asset_history WHERE asset_id = ? AND date = ?", 
+                                (asset['id'], r_date_str)
+                            ).fetchone()
+                            
+                            if exist_row:
+                                # [Overlap Update]
+                                # 이미 존재하면: 수량은 절대 건드리지 않고, 가격/가치만 업데이트
+                                exist_qty = float(exist_row['quantity']) if exist_row['quantity'] is not None else 0
+                                new_val   = exist_qty * h_price * rate
+                                
+                                conn.execute(
+                                    "UPDATE asset_history SET price = ?, value = ? WHERE id = ?",
+                                    (h_price, new_val, exist_row['id'])
+                                )
+                                # 마지막 날짜였다면, 다음 날(Gap) 채울때 이 수량을 기준으로 함
+                                last_qty = exist_qty
+                                
+                            else:
+                                # [Gap Filling]
+                                # 존재하지 않으면: 신규 추가 (수량은 직전 수량 계승)
+                                # 단, 직전 수량(last_qty) 사용
+                                new_val = last_qty * h_price * rate
+                                
+                                conn.execute(
+                                    "INSERT INTO asset_history (asset_id, date, price, quantity, value) VALUES (?, ?, ?, ?, ?)",
+                                    (asset['id'], r_date_str, h_price, last_qty, new_val)
+                                )
+                    
+                    print(f"      ✅ 시세 동기화 완료 ({asset['name']})")
 
 
-                
-                # 3-1. 현재가 업데이트
-                # 현재 가치는 항상 최신 수량 * 최신 가격
-                new_value = qty * current_price * rate
+                # 3-1. 자산 현재가 업데이트 (Asset Table)
+                # 현재 가치는 항상 [해당 자산의 DB상 수량] * [최신 가격]
+                # (주의: asset['quantity']는 사용자가 수정한 것일 수 있으므로 그대로 사용)
+                final_qty = float(asset['quantity'])
+                new_value = final_qty * current_price * rate
                 
                 # 상세 정보가 날라가지 않도록 값만 업데이트하는 함수 사용
                 from database import update_asset_value_only
-                update_asset_value_only(asset['id'], new_value, qty)
-                
-                # 3-2. 일반 Backfill 데이터 저장
-                # (위의 재계산 로직이 실행되었다면, 여기서 추가되는 데이터는 중복 방지 로직에 의해 걸러짐)
-                if hist_data is not None and not hist_data.empty:
-                    batch_history = []
-                    
-                    # 자산의 마지막 기록 날짜 확인
-                    last_db_date_str = get_last_history_date(asset['id'])
-                    last_db_val      = datetime.strptime(last_db_date_str, "%Y-%m-%d") if last_db_date_str else (today - timedelta(days=365))
-                    
-                    for ts, row in hist_data.iterrows():
-                        row_date = ts.to_pydatetime()
-                        if row_date.tzinfo is not None:
-                            row_date = row_date.replace(tzinfo=None)
-                        
-                        # DB에 있는 마지막 날짜보다 미래인 경우만 추가 (중복 방지)
-                        if row_date > last_db_val:
-                            h_price = row['Close']
-                            
-                            batch_history.append({
-                                'date'    : row_date.strftime("%Y-%m-%d"),
-                                'price'   : h_price,
-                                'quantity': qty,
-                                'value'   : h_price * qty * rate
-                            })
-                    
-                    if batch_history:
-                        insert_history_batch(asset['id'], batch_history)
-                        print(f"      + {len(batch_history)}일치 이력 추가 ({asset['name']})")
+                update_asset_value_only(asset['id'], new_value, final_qty)
                 
                 updated_count += 1
                 

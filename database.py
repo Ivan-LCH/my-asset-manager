@@ -35,6 +35,43 @@ def get_connection():
 
 
 # -----------------------------------------------------------------------------------------------------
+# 환율 관련 유틸리티
+# -----------------------------------------------------------------------------------------------------
+def get_currency_for_asset(asset_id: str) -> str:
+    """자산의 통화 조회 (stock_details에서)"""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT currency FROM stock_details WHERE asset_id = ?", 
+            (asset_id,)
+        ).fetchone()
+        return row['currency'] if row and row['currency'] else 'KRW'
+
+
+def get_exchange_rate(currency: str = 'USD') -> float:
+    """실시간 환율 조회 (KRW는 1.0)"""
+    if currency == 'KRW':
+        return 1.0
+    
+    try:
+        import yfinance as yf
+        ticker = f"{currency}KRW=X"
+        dat = yf.Ticker(ticker)
+        
+        rate = dat.fast_info.get('last_price')
+        if not rate:
+            hist = dat.history(period="1d")
+            if not hist.empty:
+                rate = hist['Close'].iloc[-1]
+            else:
+                rate = 1450.0  # Fallback (2024 기준)
+        
+        return float(rate)
+    except Exception as e:
+        print(f"⚠️ 환율 조회 실패 ({currency}): {e}")
+        return 1450.0 if currency == 'USD' else 1.0
+
+
+# -----------------------------------------------------------------------------------------------------
 # 스키마 정의
 # -----------------------------------------------------------------------------------------------------
 SCHEMA_SQL = """
@@ -69,7 +106,6 @@ CREATE TABLE IF NOT EXISTS stock_details (
     asset_id TEXT PRIMARY KEY,
     account_name TEXT,
     currency TEXT DEFAULT 'KRW',
-    is_balance_adjustment INTEGER DEFAULT 0,
     is_pension_like INTEGER DEFAULT 0,
     pension_start_year INTEGER,
     pension_monthly REAL,
@@ -175,14 +211,13 @@ def _insert_detail(conn, asset: dict):
     
     elif a_type == 'STOCK':
         conn.execute("""
-            INSERT INTO stock_details (asset_id, account_name, currency, is_balance_adjustment, 
+            INSERT INTO stock_details (asset_id, account_name, currency, 
                                        is_pension_like, pension_start_year, pension_monthly, ticker)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             a_id,
             asset.get('account_name'),
             asset.get('currency', 'KRW'),
-            1 if asset.get('is_balance_adjustment') else 0,
             1 if asset.get('is_pension_like') else 0,
             asset.get('pension_start_year'),
             asset.get('pension_monthly'),
@@ -270,19 +305,45 @@ def delete_asset(asset_id: str):
 
 
 def get_all_assets() -> list:
-    """모든 자산 조회 (상세 정보 JOIN)"""
+    """모든 자산 조회 (상세 정보 JOIN + 이력 Bulk Load)"""
     with get_connection() as conn:
+        # 1. 자산 기본 정보 조회
         rows = conn.execute("SELECT * FROM assets").fetchall()
         assets = []
         for row in rows:
             asset = dict(row)
-            # 상세 정보 가져오기
+            # 상세 정보 가져오기 (여전히 N+1이지만 테이블이 작아서 허용, 필요시 이것도 JOIN으로 최적화 가능)
             detail = _get_detail(conn, asset['id'], asset['type'])
             if detail:
                 asset.update(detail)
-            # 이력 가져오기
-            asset['history'] = get_asset_history(asset['id'])
+            asset['history'] = [] # 초기화
             assets.append(asset)
+            
+        # 2. 이력 Bulk 조회 (N+1 문제 해결)
+        # 모든 이력을 날짜순으로 가져옴
+        history_rows = conn.execute("SELECT * FROM asset_history ORDER BY date").fetchall()
+        
+        # 3. 메모리에서 매핑
+        history_map = {}
+        for h in history_rows:
+            aid = h['asset_id']
+            if aid not in history_map:
+                history_map[aid] = []
+            
+            # dict로 변환 (필요한 필드만)
+            rec = {
+                'date': h['date'], 
+                'value': h['value'], 
+                'price': h['price'], 
+                'quantity': h['quantity']
+            }
+            history_map[aid].append(rec)
+            
+        # 4. 자산에 할당
+        for asset in assets:
+            if asset['id'] in history_map:
+                asset['history'] = history_map[asset['id']]
+                
         return assets
 
 
@@ -352,6 +413,80 @@ def get_last_history_date(asset_id: str) -> str:
             SELECT MAX(date) as last_date FROM asset_history WHERE asset_id = ?
         """, (asset_id,)).fetchone()
         return row['last_date'] if row and row['last_date'] else None
+
+
+def update_history_and_future_quantities(asset_id: str, target_date: str, new_price: float, new_quantity: float):
+    """
+    특정 날짜의 이력을 수정하고, 수량이 변경된 경우 그 이후 날짜의 모든 수량을 업데이트함.
+    (단, 이후 데이터의 단가는 유지하고, 가치만 재계산)
+    [수정] 환율 적용: 해외주식의 경우 단가 * 수량 * 환율로 원화 가치 계산
+    """
+    # 환율 조회 (함수 내에서 한 번만 조회)
+    currency = get_currency_for_asset(asset_id)
+    rate = get_exchange_rate(currency)
+    print(f"💱 환율 적용: {currency} -> {rate:,.2f} KRW")
+    
+    with get_connection() as conn:
+        # 1. 대상 날짜 존재 여부 확인
+        target = conn.execute("SELECT * FROM asset_history WHERE asset_id = ? AND date = ?", (asset_id, target_date)).fetchone()
+        
+        if not target:
+            # 신규 추가 (이 경우엔 미래 전파 로직은 적용하지 않음, 단순 추가)
+            val = new_price * new_quantity * rate  # [수정] 환율 적용
+            insert_history(asset_id, {'date': target_date, 'price': new_price, 'quantity': new_quantity, 'value': val})
+        else:
+            old_qty = float(target['quantity']) if target['quantity'] else 0
+            
+            # 2. 대상 날짜 업데이트
+            val = new_price * new_quantity * rate  # [수정] 환율 적용
+            conn.execute("""
+                UPDATE asset_history 
+                SET price = ?, quantity = ?, value = ?
+                WHERE asset_id = ? AND date = ?
+            """, (new_price, new_quantity, val, asset_id, target_date))
+            
+            # 3. 수량이 변경되었다면 미래 데이터 전파
+            if old_qty != new_quantity:
+                print(f"🔄 수량 변경 감지 ({old_qty} -> {new_quantity}). {target_date} 이후 데이터 전파...")
+                
+                # 미래 데이터 조회
+                future_rows = conn.execute("""
+                    SELECT id, date, price, quantity FROM asset_history 
+                    WHERE asset_id = ? AND date > ?
+                    ORDER BY date
+                """, (asset_id, target_date)).fetchall()
+                
+                for row in future_rows:
+                    f_price = float(row['price']) if row['price'] else 0
+                    # 단가는 유지, 수량은 새로운 수량으로 대체
+                    f_new_val = f_price * new_quantity * rate  # [수정] 환율 적용
+                    
+                    conn.execute("""
+                        UPDATE asset_history 
+                        SET quantity = ?, value = ?
+                        WHERE id = ?
+                    """, (new_quantity, f_new_val, row['id']))
+                    
+                print(f"   ✅ {len(future_rows)}건의 미래 데이터 수량 업데이트 완료.")
+        
+        # 4. [Sync] 변경된 이력을 바탕으로 assets 테이블의 현재 상태(current_value, quantity) 동기화
+        # 항상 '가장 최신 날짜'의 데이터를 기준으로 함
+        latest = conn.execute("""
+            SELECT price, quantity, value FROM asset_history 
+            WHERE asset_id = ? 
+            ORDER BY date DESC LIMIT 1
+        """, (asset_id,)).fetchone()
+        
+        if latest:
+            l_qty = float(latest['quantity']) if latest['quantity'] else 0
+            l_val = float(latest['value']) if latest['value'] else 0
+            
+            # 주식/실물 등 수량 기반이면 수량도 업데이트
+            conn.execute("""
+                UPDATE assets 
+                SET current_value = ?, quantity = ?, updated_at = ?
+                WHERE id = ?
+            """, (l_val, l_qty, datetime.now().isoformat(), asset_id))
 
 
 def delete_asset_history(asset_id: str):

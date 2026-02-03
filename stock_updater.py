@@ -99,7 +99,17 @@ def update_all_stocks():
             # 최소 시작일이 오늘보다 미래라면, 데이터가 이미 최신인 상태지만
             # 장중 업데이트를 고려해 오늘 데이터는 다시 가져오는 것이 좋음
             fetch_start = min(start_date_candidates)
-            print(f"   📥 데이터 확인 기간: {fetch_start.strftime('%Y-%m-%d')} ~ {today.strftime('%Y-%m-%d')}")
+            
+            # [Fix] 최소 7일 이전부터 가져오도록 보장 (주말/공휴일 대비)
+            min_fetch_start = today - timedelta(days=7)
+            if fetch_start > min_fetch_start:
+                fetch_start = min_fetch_start
+            
+            # [Fix] yfinance에는 문자열 날짜를 사용 (타임존 이슈 방지)
+            fetch_start_str = fetch_start.strftime('%Y-%m-%d')
+            fetch_end_str   = (today + timedelta(days=1)).strftime('%Y-%m-%d')
+            
+            print(f"   📥 데이터 확인 기간: {fetch_start_str} ~ {fetch_end_str}")
 
             # (2) 데이터 다운로드
             yf_ticker = yf.Ticker(ticker)
@@ -111,7 +121,14 @@ def update_all_stocks():
             except: pass
             
             # 히스토리 데이터 다운로드 (Start ~ Today+1)
-            hist_data = yf_ticker.history(start=fetch_start, end=today + timedelta(days=1), auto_adjust=True)
+            # [Fix] 문자열 날짜 사용
+            hist_data = yf_ticker.history(start=fetch_start_str, end=fetch_end_str, auto_adjust=True)
+            
+            # [Debug] 실제 가져온 데이터 범위 출력
+            if not hist_data.empty:
+                print(f"   📊 실제 데이터: {hist_data.index[0].strftime('%Y-%m-%d')} ~ {hist_data.index[-1].strftime('%Y-%m-%d')} ({len(hist_data)}건)")
+            else:
+                print(f"   ⚠️ yfinance에서 빈 데이터 반환됨")
                 
             # 만약 current_price를 못 구했으면 hist 데이터에서 조회
             if (current_price == 0 or current_price is None):

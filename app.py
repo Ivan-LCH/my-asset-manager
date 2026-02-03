@@ -496,6 +496,9 @@ def render_asset_detail(asset, precalc_df=None):
         df_edit = pd.DataFrame(data_list)
         if df_edit.empty:
             df_edit = pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'value': [0.0]}) if not is_qty_based else pd.DataFrame({'date': [datetime.now().strftime("%Y-%m-%d")], 'price': [0.0], 'quantity': [0.0]})
+        else:
+            # [수정] 날짜 역순 정렬 (최신 데이터가 위로)
+            df_edit = df_edit.sort_values('date', ascending=False).reset_index(drop=True)
         
         # [수정] 행 선택 가능하도록 설정
         event = st.dataframe(

@@ -467,6 +467,18 @@ def render_asset_detail(asset, precalc_df=None):
             hovermode               = "x unified",
             xaxis                   = dict(nticks=20, tickformat="%y.%m.%d")
         )
+        
+        # [수정] 주식의 경우, 변동성을 잘 보여주기 위해 Y축 스케일 조정 (0부터 시작하지 않음)
+        if a_type == 'STOCK':
+             y_vals = df_chart['value_man']
+             y_min  = y_vals.min()
+             y_max  = y_vals.max()
+             gap    = (y_max - y_min) * 0.1
+             if gap == 0: gap = y_max * 0.05
+             
+             # 0 미만으로 내려가지 않도록 하되, 0부터 시작하진 않음
+             fig.update_layout(yaxis = dict(range=[max(0, y_min - gap), y_max + gap], tickformat=",.0f"))
+             
         st.plotly_chart(fig, use_container_width=True, key=f"chart_{asset['id']}")
     else:
         st.info("데이터가 부족하여 차트를 표시할 수 없습니다.")
@@ -487,8 +499,17 @@ def render_asset_detail(asset, precalc_df=None):
         for h in hist_raw:
             row = {'date': h.get('date', '')}
             if is_qty_based:
-                row['price'   ] = safe_float(h.get('price', 0))
-                row['quantity'] = safe_float(h.get('quantity', 0))
+                p = safe_float(h.get('price', 0))
+                q = safe_float(h.get('quantity', 0))
+                v = safe_float(h.get('value', 0))
+                
+                # [Fix] Legacy data support: if price/qty are 0 but value exists, assume qty=1
+                if p == 0 and q == 0 and v > 0:
+                    p = v
+                    q = 1.0
+                
+                row['price']    = p
+                row['quantity'] = q
             else:
                 row['value'   ] = safe_float(h.get('value', 0))
             data_list.append(row)
@@ -861,6 +882,12 @@ elif menu in TYPE_LABEL_MAP.values():
                         count = stock_updater.update_all_stocks()
                         if count > 0: st.success(f"{count}개 종목 업데이트 완료!")
                         else        : st.warning("업데이트된 종목이 없습니다. (Ticker 설정을 확인하세요)")
+                        
+                        # [Fix] 데이터 갱신 반영을 위해 캐시 및 세션 초기화
+                        st.cache_data.clear()
+                        if 'assets' in st.session_state:
+                            del st.session_state['assets']
+                        
                         time.sleep(1)
                         st.rerun()
                     except ImportError:
@@ -879,100 +906,150 @@ elif menu in TYPE_LABEL_MAP.values():
 
     if my_assets:
         # [수정] 상단 차트도 자산 유형별 기간(3년/10년) 적용
-        df_hist = generate_history_df(my_assets, target_type)
-        if not df_hist.empty:
-            
-            # [UI Improvement] 차트 기간 선택
-            if target_type == 'STOCK':
-                c_period, _ = st.columns([1, 3])
-                period_opt = c_period.radio(
-                    "차트 기간", 
-                    ["전체", "최근 30일"], 
-                    horizontal       = True, 
-                    label_visibility = "collapsed"
-                )
-                
-                if period_opt == "최근 30일":
-                    limit_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-                    df_hist = df_hist[df_hist['date'] >= limit_date]
 
+        # [Refactoring] 차트 데이터 일괄 생성 및 필터링 (Global Filter)
+        full_chart_data = generate_history_df(my_assets, target_type)
+        
+        # [UI Improvement] 차트 기간 선택 (Global) - Advanced
+        start_date = None
+        end_date   = None
+        limit_date = None
+        
+        if target_type == 'STOCK' and not full_chart_data.empty:
+            # 1. State 초기화
+            if 'chart_period_preset' not in st.session_state:
+                st.session_state['chart_period_preset'] = '전체'
+            
+            # 2. 날짜 계산 헬퍼
+            today = datetime.now().date()
+            base_start = datetime(2023, 1, 1).date()
+            
+            def get_preset_range(preset):
+                if preset == '전체':
+                    return base_start, today
+                elif preset == '최근 1년':
+                    return today - timedelta(days=365), today
+                elif preset == '최근 3개월':
+                    return today - timedelta(days=90), today
+                elif preset == '최근 1개월':
+                    return today - timedelta(days=30), today
+                return base_start, today
+
+            # 3. 프리셋 변경 시 처리 (Callback)
+            def on_preset_change():
+                sel = st.session_state['chart_period_preset']
+                s, e = get_preset_range(sel)
+                st.session_state['chart_start_date'] = s
+                st.session_state['chart_end_date']   = e
+
+            # 4. UI 렌더링
+            # 상단: 프리셋 선택 / 하단: Date Picker (From - To)
+            # [수정] 전체 너비의 1/3을 차지하도록 비율 조정 (Inputs: 3.2 / Sum: ~9.7 => ~33%)
+            c_p1, c_p2, c_p3, _ = st.columns([1.2, 1, 1, 6.5])
+            
+            with c_p1:
+                st.selectbox(
+                    "기간 설정", 
+                    options=['전체', '최근 1년', '최근 3개월', '최근 1개월'], 
+                    key='chart_period_preset',
+                    on_change=on_preset_change,
+                    label_visibility="collapsed"
+                )
+            
+            # 초기값 동기화 (세션에 없으면 프리셋 기준 설정)
+            if 'chart_start_date' not in st.session_state:
+                s, e = get_preset_range(st.session_state['chart_period_preset'])
+                st.session_state['chart_start_date'] = s
+                st.session_state['chart_end_date']   = e
+            
+            with c_p2:
+                d_start = st.date_input(
+                    "From", 
+                    value=st.session_state['chart_start_date'],
+                    key='chart_start_date',
+                    label_visibility="collapsed"
+                )
+            with c_p3:
+                d_end = st.date_input(
+                    "To", 
+                    value=st.session_state['chart_end_date'],
+                    key='chart_end_date',
+                    label_visibility="collapsed"
+                )
+            
+            # [Filter Appling]
+            # 문자열 비교를 위해 변환
+            s_str = d_start.strftime("%Y-%m-%d")
+            e_str = d_end.strftime("%Y-%m-%d")
+            
+            full_chart_data = full_chart_data[
+                (full_chart_data['date'] >= s_str) & 
+                (full_chart_data['date'] <= e_str)
+            ]
+            
+            # 30일(1개월) 로직 등 기존 로직 호환성을 위해 limit_date 플래그 설정
+            # (Y축 스케일 조정 로직 트리거용: 전체가 아니면 조정)
+            limit_date = True if st.session_state['chart_period_preset'] != '전체' else None
+            
+            # 만약 사용자가 날짜를 수동으로 바꿨다면 프리셋과 다를 수 있음 -> 별도 처리 안해도 됨 (값 우선)
+
+        # 상단 차트용 데이터 (이미 필터링됨)
+        df_hist = full_chart_data
+        
+        if not df_hist.empty:
             df_hist['value_man'] = df_hist['value'] / 10000
             
-            # [수정] 최근 30일일 경우 합계 라인 차트 & Y축 Auto Range
-            if target_type == 'STOCK' and period_opt == "최근 30일":
+            # [수정] 모든 기간에 대해 동일한 Area Chart 적용 (기간 필터만 다름)
+            if target_type == 'STOCK' and view_mode == "계좌별 보기":
+                df_chart_grp = df_hist.groupby(['date', 'account'])['value_man'].sum().reset_index()
                 # 날짜별 합계 계산
-                df_daily_sum = df_hist.groupby('date')['value_man'].sum().reset_index()
+                df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
+                df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
                 
-                # Y축 범위 계산 (변동폭 강조)
-                y_min = df_daily_sum['value_man'].min()
-                y_max = df_daily_sum['value_man'].max()
-                gap   = (y_max - y_min) * 0.2
-                if gap == 0: gap = y_max * 0.01
-
-                fig = px.line(
-                    df_daily_sum, 
+                fig = px.area(
+                    df_chart_grp, 
                     x                       = 'date', 
                     y                       = 'value_man', 
-                    labels                  = {'value_man': '총 평가액(만원)'},
-                    color_discrete_sequence = ['#4c6ef5'], 
-                    markers                 = True
-                ) 
+                    color                   = 'account', 
+                    color_discrete_sequence = PASTEL_COLORS, 
+                    labels                  = {'value_man': '가치(만원)'},
+                    custom_data             = ['account', 'total']
+                )
+                # 커스텀 hover 템플릿: 항목명 - 금액(만원)
+                fig.update_traces(
+                    hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
+                )
+            else:
+                df_chart_grp = df_hist.groupby(['date', 'name'])['value_man'].sum().reset_index()
+                # 날짜별 합계 계산
+                df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
+                df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
                 
-                fig.update_layout(
-                    height             = 300, 
-                    margin             = dict(t=0, b=0, l=0, r=0),
-                    hovermode          = "x unified",
-                    xaxis              = dict(nticks=20, tickformat="%y.%m.%d"),
-                    yaxis              = dict(range=[y_min - gap, y_max + gap], tickformat=",.0f") 
+                fig = px.area(
+                    df_chart_grp, 
+                    x                       = 'date', 
+                    y                       = 'value_man', 
+                    color                   = 'name', 
+                    color_discrete_sequence = PASTEL_COLORS, 
+                    labels                  = {'value_man': '가치(만원)'},
+                    custom_data             = ['name', 'total']
+                )
+                # 커스텀 hover 템플릿: 항목명 - 금액(만원)
+                fig.update_traces(
+                    hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
                 )
             
-            else:
-                # 기존: 누계(Stack) 차트
-                if target_type == 'STOCK' and view_mode == "계좌별 보기":
-                    df_chart_grp = df_hist.groupby(['date', 'account'])['value_man'].sum().reset_index()
-                    # 날짜별 합계 계산
-                    df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
-                    df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
-                    
-                    fig = px.area(
-                        df_chart_grp, 
-                        x                       = 'date', 
-                        y                       = 'value_man', 
-                        color                   = 'account', 
-                        color_discrete_sequence = PASTEL_COLORS, 
-                        labels                  = {'value_man': '가치(만원)'},
-                        custom_data             = ['account', 'total']
-                    )
-                    # 커스텀 hover 템플릿: 항목명 - 금액(만원)
-                    fig.update_traces(
-                        hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
-                    )
-                else:
-                    df_chart_grp = df_hist.groupby(['date', 'name'])['value_man'].sum().reset_index()
-                    # 날짜별 합계 계산
-                    df_totals = df_chart_grp.groupby('date')['value_man'].sum().to_dict()
-                    df_chart_grp['total'] = df_chart_grp['date'].map(df_totals)
-                    
-                    fig = px.area(
-                        df_chart_grp, 
-                        x                       = 'date', 
-                        y                       = 'value_man', 
-                        color                   = 'name', 
-                        color_discrete_sequence = PASTEL_COLORS, 
-                        labels                  = {'value_man': '가치(만원)'},
-                        custom_data             = ['name', 'total']
-                    )
-                    # 커스텀 hover 템플릿: 항목명 - 금액(만원)
-                    fig.update_traces(
-                        hovertemplate = "%{customdata[0]}: %{y:,.0f}(만원)<extra></extra>"
-                    )
-                
-                fig.update_layout(
-                    height             = 300, 
-                    margin             = dict(t=0, b=0, l=0, r=0),
-                    hovermode          = "x unified",
-                    xaxis              = dict(nticks=20, tickformat="%y.%m.%d")
-                )
+            fig.update_layout(
+                height             = 300, 
+                margin             = dict(t=0, b=0, l=0, r=0),
+                hovermode          = "x unified",
+                xaxis              = dict(nticks=20, tickformat="%y.%m.%d")
+            )
+            # 30일 보기일 경우 (Y축 0부터 시작 유지 - 별도 처리 없음)
+            if limit_date:
+                # [수정] 메인 차트는 0부터 시작하도록 강제 (Gap 로직 제거)
+                pass
+
             st.plotly_chart(fig, use_container_width=True)
 
     if target_type == 'PENSION':
@@ -1076,8 +1153,7 @@ elif menu in TYPE_LABEL_MAP.values():
     st.divider()
 
     if target_type == 'STOCK' and view_mode == "계좌별 보기":
-        # [수정] 차트 데이터 일괄 생성 (계좌별 보기에서도 적용)
-        full_chart_data = generate_history_df(my_assets, target_type)
+        # full_chart_data is already calculated and filtered above
 
         accounts = list(set([a.get('accountName', '기타') for a in my_assets]))
         
@@ -1175,6 +1251,9 @@ elif menu in TYPE_LABEL_MAP.values():
             if not df_acc_chart.empty:
                 df_acc_chart['value_man'] = df_acc_chart['value'] / 10000
                 df_acc_grp = df_acc_chart.groupby('date')['value_man'].sum().reset_index()
+                
+                # [수정] 계좌 차트도 0부터 시작하도록 강제 (Range 설정 제거)
+                
                 fig_acc = px.area(
                     df_acc_grp, 
                     x                       = 'date', 
@@ -1188,13 +1267,14 @@ elif menu in TYPE_LABEL_MAP.values():
                     hovermode = "x unified",
                     xaxis     = dict(nticks=10, tickformat="%y.%m.%d")
                 )
+                
+                # Y축 Range 설정 제거
                 st.plotly_chart(fig_acc, use_container_width=True, key=f"acc_chart_{selected_acc}")
             
             # [추가] 계좌별 차트 (잔고 보정 폼 제거됨)
             
             st.markdown("---")
             
-            # 종목 목록
             # 종목 목록
             for a in acc_assets:
                 val = safe_float(a['currentValue'])
@@ -1223,10 +1303,7 @@ elif menu in TYPE_LABEL_MAP.values():
     else:
         # 종목별 보기 (Stock View Only)
         if target_type == 'STOCK':
-             # [수정] 차트 데이터 일괄 생성 (속도 최적화 핵심)
-             # 여기서 N개의 자산에 대해 한 번만 차트 데이터를 생성함 (Vectorized)
-             # 그리고 각 render_asset_detail에는 필터링된 DF만 전달 (O(1) slicing)
-             full_chart_data = generate_history_df(my_assets, target_type)
+             # full_chart_data is already calculated and filtered above
              
              for a in my_assets:
                 val = safe_float(a['currentValue'])

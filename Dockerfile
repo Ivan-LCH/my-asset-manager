@@ -1,17 +1,42 @@
-FROM python:3.10-slim
+# My Asset Manager - 개발/운영 이미지
+FROM python:3.11
 
-# 작업 디렉토리 설정
+# 1. 필수 패키지 및 Node.js 설치
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    curl \
+    git \
+    vim \
+    tmux \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# 2. SSH 설정
+RUN mkdir -p /var/run/sshd
+RUN echo 'root:password' | chpasswd
+RUN echo "PermitRootLogin yes" >> /etc/ssh/sshd_config && \
+    echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+
+# 3. SSH 세션에서 컨테이너 환경변수 상속
+RUN printf '#!/bin/bash\nif [ -f /app/.env ]; then\n    set -a\n    source /app/.env\n    set +a\nfi\n' \
+    > /etc/profile.d/load-env.sh && chmod +x /etc/profile.d/load-env.sh
+
+# 4. 작업 디렉토리
 WORKDIR /app
 
-# 필수 패키지 설치
+# 5. Python 의존성 설치
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# (중요) 소스 코드는 COPY 하지 않습니다.
-# docker-compose에서 '볼륨'으로 연결해야 수정 사항이 바로 반영됩니다.
+# 6. Frontend 의존성 설치 (폐쇄망 대비 레이어 캐싱)
+COPY frontend/package*.json ./frontend/
+RUN cd frontend && npm install --legacy-peer-deps
 
-# Streamlit 기본 포트 노출
-EXPOSE 8502
+# 7. 엔트리포인트
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
-# 실행 명령
-CMD ["streamlit", "run", "app.py", "--server.port=8502", "--server.address=0.0.0.0"]
+EXPOSE 22 8090
+
+ENTRYPOINT ["/entrypoint.sh"]

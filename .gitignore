@@ -1,3 +1,56 @@
-service_account.json
-*.csv
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / Packaging
+.env
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Database
+*.db
+*.sqlite3
+data/
+
+# Google Sheets Auth (Migration only)
+service_account.json
+secrets.toml
+
+# Streamlit
+.streamlit/
+
+# OS specific files
+.DS_Store
+Thumbs.dbmaintenance_scripts/
+.venv/lib64
+.venv/pyvenv.cfg
+.gitignore
+.venv/bin/activate
+.venv/bin/activate.csh
+.venv/bin/activate.fish
+.venv/bin/pip
+.gitignore
+.venv/bin/pip3
+.venv/bin/pip3.10
+.gitignore
+.venv/bin/Activate.ps1
+.gitignore
+.venv/bin/python
+.venv/bin/python3
+.venv/bin/python3.10

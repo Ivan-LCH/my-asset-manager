@@ -1,9 +1,22 @@
 services:
   asset-manager:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: asset_manager_app
     container_name: my-asset-manager
     ports:
-      - "8502:8502"  # [변경됨] 호스트(8502) : 컨테이너(8502)
+      - "8090:8090"   # 웹 서비스
+      - "1040:22"     # SSH 접속 (유지보수용)
+    env_file:
+      - .env
     volumes:
-      - ./:/app
-    restart: always
+      # 소스 코드 마운트 (유지보수/업데이트 즉시 반영)
+      - .:/app
+      # node_modules 보호 (호스트와 격리)
+      - /app/frontend/node_modules
+      # SQLite DB 영속화
+      - ./data:/app/data
+      # 로그 영속화
+      - ./logs:/app/logs
+    restart: unless-stopped

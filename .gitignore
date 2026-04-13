@@ -28,6 +28,15 @@ wheels/
 *.sqlite3
 data/
 
+# Build output
+static/
+frontend/dist/
+frontend/node_modules/
+
+# Runtime
+logs/
+server.pid
+
 # Google Sheets Auth (Migration only)
 service_account.json
 secrets.toml

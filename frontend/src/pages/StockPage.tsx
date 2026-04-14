@@ -16,8 +16,10 @@ export default function StockPage() {
 
   // 계좌별 뷰: null=계좌 목록, string=선택된 계좌명
   const [activeAccount, setActiveAccount] = useState<string | null>(null)
-  const [modalAsset,    setModalAsset]    = useState<Asset | null>(null)
+  const [modalId,       setModalId]       = useState<string | null>(null)
   const [showCreate,    setShowCreate]    = useState(false)
+
+  const modalAsset = assets.find((a) => a.id === modalId) ?? null
 
   const active = assets.filter((a) => !a.disposalDate)
   const sold   = assets.filter((a) => !!a.disposalDate)
@@ -129,7 +131,7 @@ export default function StockPage() {
               <h3 className="text-sm font-semibold text-gray-400">매각 완료 ({sold.length})</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-55">
                 {sold.map((a) => (
-                  <StockTile key={a.id} asset={a} onClick={() => setModalAsset(a)} />
+                  <StockTile key={a.id} asset={a} onClick={() => setModalId(a.id)} />
                 ))}
               </div>
             </section>
@@ -160,7 +162,7 @@ export default function StockPage() {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {currentStocks.map((a) => (
-                <StockTile key={a.id} asset={a} onClick={() => setModalAsset(a)} />
+                <StockTile key={a.id} asset={a} onClick={() => setModalId(a.id)} />
               ))}
             </div>
           </section>
@@ -168,7 +170,7 @@ export default function StockPage() {
       )}
 
       {/* 모달 */}
-      <AssetModal asset={modalAsset} onClose={() => setModalAsset(null)} />
+      <AssetModal asset={modalAsset} onClose={() => setModalId(null)} />
     </div>
   )
 }

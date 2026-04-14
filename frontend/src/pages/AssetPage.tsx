@@ -13,8 +13,10 @@ interface Props { type: AssetType }
 export default function AssetPage({ type }: Props) {
   const assets = useAssetsByType(type)
   const { isLoading } = useAssets()
-  const [modalAsset, setModalAsset] = useState<Asset | null>(null)
+  const [modalId,    setModalId]    = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  const modalAsset = assets.find((a) => a.id === modalId) ?? null
 
   const active = assets.filter((a) => !a.disposalDate)
   const sold   = assets.filter((a) => !!a.disposalDate)
@@ -77,7 +79,7 @@ export default function AssetPage({ type }: Props) {
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {active.map((a) => (
-              <AssetTile key={a.id} asset={a} isQtyBased={isQtyBased} onClick={() => setModalAsset(a)} />
+              <AssetTile key={a.id} asset={a} isQtyBased={isQtyBased} onClick={() => setModalId(a.id)} />
             ))}
           </div>
         </section>
@@ -89,7 +91,7 @@ export default function AssetPage({ type }: Props) {
           <h3 className="text-sm font-semibold text-gray-400">매각 완료 ({sold.length})</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-55">
             {sold.map((a) => (
-              <AssetTile key={a.id} asset={a} isQtyBased={isQtyBased} onClick={() => setModalAsset(a)} />
+              <AssetTile key={a.id} asset={a} isQtyBased={isQtyBased} onClick={() => setModalId(a.id)} />
             ))}
           </div>
         </section>
@@ -101,7 +103,7 @@ export default function AssetPage({ type }: Props) {
         </div>
       )}
 
-      <AssetModal asset={modalAsset} onClose={() => setModalAsset(null)} />
+      <AssetModal asset={modalAsset} onClose={() => setModalId(null)} />
     </div>
   )
 }

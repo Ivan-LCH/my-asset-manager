@@ -57,8 +57,10 @@ export default function PensionPage() {
 
   const { data: settings } = useSettings()
 
-  const [modalAsset, setModalAsset] = useState<Asset | null>(null)
+  const [modalId,    setModalId]    = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  const modalAsset = allAssets.find((a) => a.id === modalId) ?? null
 
   const currentAge    = settings?.currentAge    ?? 40
   const retirementAge = settings?.retirementAge ?? 65
@@ -173,7 +175,7 @@ export default function PensionPage() {
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {active.map((a) => (
-            <PensionTile key={a.id} asset={a} onClick={() => setModalAsset(a)} />
+            <PensionTile key={a.id} asset={a} onClick={() => setModalId(a.id)} />
           ))}
         </div>
       </section>
@@ -188,7 +190,7 @@ export default function PensionPage() {
               .map((a) => (
                 <button
                   key={a.id}
-                  onClick={() => setModalAsset(a)}
+                  onClick={() => setModalId(a.id)}
                   className="text-left bg-gray-800 border border-gray-700 rounded-xl px-4 py-3
                     hover:border-blue-500/60 transition-all group"
                 >
@@ -202,7 +204,7 @@ export default function PensionPage() {
         </section>
       )}
 
-      <AssetModal asset={modalAsset} onClose={() => setModalAsset(null)} />
+      <AssetModal asset={modalAsset} onClose={() => setModalId(null)} />
     </div>
   )
 }

@@ -11,8 +11,10 @@ import type { Asset, RealEstateDetail } from '@/types'
 export default function RealEstatePage() {
   const assets = useAssetsByType('REAL_ESTATE')
   const { isLoading } = useAssets()
-  const [selected,   setSelected]   = useState<Asset | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showCreate, setShowCreate] = useState(false)
+
+  const selected = assets.find((a) => a.id === selectedId) ?? null
 
   const active = assets.filter((a) => !a.disposalDate)
   const sold   = assets.filter((a) => !!a.disposalDate)
@@ -65,7 +67,7 @@ export default function RealEstatePage() {
           <h3 className="text-sm font-semibold text-gray-400">보유 ({active.length})</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {active.map((a) => (
-              <RealEstateTile key={a.id} asset={a} onClick={() => setSelected(a)} />
+              <RealEstateTile key={a.id} asset={a} onClick={() => setSelectedId(a.id)} />
             ))}
           </div>
         </section>
@@ -77,7 +79,7 @@ export default function RealEstatePage() {
           <h3 className="text-sm font-semibold text-gray-400">매각 완료 ({sold.length})</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-55">
             {sold.map((a) => (
-              <RealEstateTile key={a.id} asset={a} onClick={() => setSelected(a)} />
+              <RealEstateTile key={a.id} asset={a} onClick={() => setSelectedId(a.id)} />
             ))}
           </div>
         </section>
@@ -90,7 +92,7 @@ export default function RealEstatePage() {
       )}
 
       {/* 모달 */}
-      <AssetModal asset={selected} onClose={() => setSelected(null)} />
+      <AssetModal asset={selected} onClose={() => setSelectedId(null)} />
     </div>
   )
 }

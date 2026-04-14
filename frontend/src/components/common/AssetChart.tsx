@@ -8,6 +8,48 @@ import PeriodFilter, { Period } from './PeriodFilter'
 import type { AssetType, ChartDataPoint } from '@/types'
 import { TYPE_COLORS, formatManwon } from '@/lib/utils'
 
+interface CustomTooltipProps {
+  active?:  boolean
+  payload?: { name: string; value: number; color: string }[]
+  label?:   string
+}
+
+function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null
+
+  const total = payload.reduce((s, p) => s + (p.value ?? 0), 0)
+  const hasMultiple = payload.length > 1
+
+  return (
+    <div className="bg-gray-900 border border-gray-700 rounded-xl p-3 shadow-2xl min-w-[160px]">
+      <p className="text-xs text-gray-400 mb-2 font-medium">{label}</p>
+      <div className="space-y-1.5">
+        {payload.map((p) => (
+          <div key={p.name} className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+              <span className="text-xs text-gray-400 truncate">{p.name}</span>
+            </div>
+            <span className="text-xs font-semibold text-gray-100 shrink-0">{formatManwon(p.value)}</span>
+          </div>
+        ))}
+      </div>
+      {hasMultiple && (
+        <div className="mt-2 pt-2 border-t border-gray-700 flex items-center justify-between">
+          <span className="text-xs text-gray-400 font-medium">합계</span>
+          <span className="text-sm font-bold text-blue-400">{formatManwon(total)}</span>
+        </div>
+      )}
+      {!hasMultiple && (
+        <div className="mt-1.5 pt-1.5 border-t border-gray-700 flex items-center justify-between">
+          <span className="text-xs text-gray-500">합계</span>
+          <span className="text-sm font-bold text-blue-400">{formatManwon(total)}</span>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // recharts용: label별 색상 반환
 const LABEL_COLOR_MAP: Record<string, string> = {
   '🏠 부동산':   TYPE_COLORS.REAL_ESTATE,
@@ -102,11 +144,7 @@ export default function AssetChart({
             tickFormatter={(v: number) => `${Math.round(v / 10000).toLocaleString()}만`}
             width={60}
           />
-          <Tooltip
-            contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
-            labelStyle={{ color: '#9ca3af', fontSize: 12 }}
-            formatter={(value: number, name: string) => [formatManwon(value), name]}
-          />
+          <Tooltip content={<CustomTooltip />} />
           {labels.length > 1 && (
             <Legend
               wrapperStyle={{ fontSize: 12, color: '#9ca3af', paddingTop: 8 }}

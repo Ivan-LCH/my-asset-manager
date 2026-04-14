@@ -141,7 +141,7 @@ export default function AssetChart({
             tick={{ fill: '#6b7280', fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => `${Math.round(v / 10000).toLocaleString()}만`}
+            tickFormatter={(v: number) => `${Math.round(v / 1000).toLocaleString()}천`}
             width={60}
           />
           <Tooltip content={<CustomTooltip />} />

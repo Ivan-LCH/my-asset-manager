@@ -137,7 +137,7 @@ export default function PensionPage() {
               <YAxis
                 tick={{ fill: '#6b7280', fontSize: 10 }}
                 tickLine={false} axisLine={false}
-                tickFormatter={(v: number) => `${Math.round(v / 10000).toLocaleString()}만`}
+                tickFormatter={(v: number) => `${Math.round(v / 1000).toLocaleString()}천`}
                 width={52}
               />
               <Tooltip

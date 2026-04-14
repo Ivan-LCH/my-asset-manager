@@ -54,10 +54,10 @@ export default function AssetDetail({ asset, chartData }: Props) {
   }
 
   const miniChart = chartData
-    ? chartData.map((c) => ({ ...c, valueMan: c.value / 10000 }))
+    ? chartData.map((c) => ({ ...c, valueMan: c.value / 1000 }))
     : a.history.map((h) => ({
         date: h.date,
-        valueMan: (h.value ?? 0) / 10000,
+        valueMan: (h.value ?? 0) / 1000,
       })).sort((x, y) => x.date.localeCompare(y.date))
 
   return (
@@ -148,12 +148,12 @@ export default function AssetDetail({ asset, chartData }: Props) {
               <YAxis
                 tick={{ fill: '#6b7280', fontSize: 10 }}
                 tickLine={false} axisLine={false}
-                tickFormatter={(v: number) => `${Math.round(v).toLocaleString()}만`}
+                tickFormatter={(v: number) => `${Math.round(v).toLocaleString()}천`}
                 width={52}
               />
               <Tooltip
                 contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
-                formatter={(v: number) => [`${v.toLocaleString()}만원`]}
+                formatter={(v: number) => [`${v.toLocaleString()}천원`]}
                 labelStyle={{ color: '#9ca3af', fontSize: 11 }}
               />
               <Area

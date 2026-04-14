@@ -15,6 +15,19 @@ from backend.db.models import Asset, AssetHistory, StockDetail
 _RATE_CACHE: dict[str, float] = {}
 
 
+def normalize_ticker(ticker: str) -> str:
+    """
+    yfinance용 ticker 정규화.
+    - 앞뒤 공백 제거, 대문자 변환
+    - 한국 거래소 suffix: .KR / .kr / .ks → .KS
+    """
+    t = ticker.strip().upper()
+    # .KR 은 yfinance에서 인식 안 됨 → .KS 로 교정
+    if t.endswith(".KR"):
+        t = t[:-3] + ".KS"
+    return t
+
+
 def get_exchange_rate(currency: str) -> float:
     """통화 → KRW 환율 조회"""
     if currency == "KRW":
@@ -64,7 +77,7 @@ async def update_all_stocks(db: AsyncSession) -> dict:
     # 2. Ticker별 그룹화 (동일 Ticker = API 1회 호출)
     ticker_map: dict[str, list[tuple]] = {}
     for asset, detail in rows:
-        t = detail.ticker.upper().strip()
+        t = normalize_ticker(detail.ticker)
         if t not in ticker_map:
             ticker_map[t] = []
         ticker_map[t].append((asset, detail))

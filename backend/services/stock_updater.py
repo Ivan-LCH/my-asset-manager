@@ -87,6 +87,7 @@ async def update_all_stocks(db: AsyncSession) -> dict:
     updated_count  = 0
     failed_tickers = []
     today_str      = datetime.now().strftime("%Y-%m-%d")
+    tomorrow_str   = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
     for ticker, asset_list in ticker_map.items():
         try:
@@ -106,9 +107,9 @@ async def update_all_stocks(db: AsyncSession) -> dict:
             start_date = min(start_candidates)
             print(f"⏳ {ticker}: {start_date.strftime('%Y-%m-%d')} ~ {today_str}")
 
-            # 4. yfinance 시세 조회
+            # 4. yfinance 시세 조회 (end는 exclusive이므로 내일 날짜 사용 → 오늘 종가 포함)
             yf_ticker = yf.Ticker(ticker)
-            hist_df   = yf_ticker.history(start=start_date.strftime("%Y-%m-%d"), end=today_str)
+            hist_df   = yf_ticker.history(start=start_date.strftime("%Y-%m-%d"), end=tomorrow_str)
 
             if hist_df.empty:
                 print(f"⚠️ {ticker}: 데이터 없음")

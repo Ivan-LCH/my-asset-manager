@@ -115,19 +115,35 @@ async def update_all_stocks(db: AsyncSession) -> dict:
                 print(f"⚠️ {ticker}: 데이터 없음")
                 continue
 
-            # 5. 각 자산에 이력 Upsert
+            # 5-a. 장중 실시간 현재가 조회
+            # hist_df에 오늘 날짜가 없으면 장이 아직 열려 있는 것 → fast_info로 현재가 시도
+            today_in_hist = any(
+                idx.strftime("%Y-%m-%d") == today_str for idx in hist_df.index
+            )
+            realtime_price: float | None = None
+            if not today_in_hist:
+                try:
+                    fi = yf_ticker.fast_info
+                    rt = getattr(fi, "last_price", None)
+                    if rt and float(rt) > 0:
+                        realtime_price = float(rt)
+                        print(f"📡 {ticker}: 장중 현재가 {realtime_price:,.0f} (종가 확정 전)")
+                except Exception as e:
+                    print(f"⚠️ {ticker}: 실시간 현재가 조회 실패 ({e})")
+
+            # 5-b. 각 자산에 이력 Upsert
             for asset, detail in asset_list:
                 currency = detail.currency or "KRW"
                 rate     = get_exchange_rate(currency)
+                qty      = asset.quantity or 0
 
+                # (a) 확정 종가 이력 upsert (hist_df)
                 for date_idx, row in hist_df.iterrows():
                     date_str = date_idx.strftime("%Y-%m-%d")
                     price    = float(row["Close"])
-                    qty      = asset.quantity or 0
                     value    = price * qty * rate
 
-                    # Upsert: 해당 날짜 존재 시 덮어쓰기
-                    existing_q = select(AssetHistory).where(
+                    existing_q   = select(AssetHistory).where(
                         AssetHistory.asset_id == asset.id,
                         AssetHistory.date     == date_str,
                     )
@@ -147,10 +163,35 @@ async def update_all_stocks(db: AsyncSession) -> dict:
                             value    = value,
                         ))
 
-                # 6. assets 테이블 current_value 동기화 (최신 종가 기준)
-                if not hist_df.empty:
-                    latest_price = float(hist_df["Close"].iloc[-1])
-                    asset.current_value = latest_price * (asset.quantity or 0) * rate
+                # (b) 장중: 오늘 날짜 실시간 현재가 upsert (장 마감 후 재업데이트 시 종가로 덮어써짐)
+                if realtime_price is not None:
+                    rt_value     = realtime_price * qty * rate
+                    existing_q   = select(AssetHistory).where(
+                        AssetHistory.asset_id == asset.id,
+                        AssetHistory.date     == today_str,
+                    )
+                    existing_res = await db.execute(existing_q)
+                    existing     = existing_res.scalar_one_or_none()
+
+                    if existing:
+                        existing.price    = realtime_price
+                        existing.quantity = qty
+                        existing.value    = rt_value
+                    else:
+                        db.add(AssetHistory(
+                            asset_id = asset.id,
+                            date     = today_str,
+                            price    = realtime_price,
+                            quantity = qty,
+                            value    = rt_value,
+                        ))
+
+                # 6. current_value 동기화: 실시간가 우선, 없으면 hist_df 최신 종가
+                final_price = realtime_price if realtime_price else (
+                    float(hist_df["Close"].iloc[-1]) if not hist_df.empty else None
+                )
+                if final_price:
+                    asset.current_value = final_price * qty * rate
                     asset.updated_at    = datetime.now().isoformat()
 
                 updated_count += 1

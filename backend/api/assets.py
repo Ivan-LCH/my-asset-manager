@@ -26,10 +26,16 @@ async def asset_chart(
     type:     Optional[str] = Query(None),
     period:   str           = Query("all", description="all|10y|3y|1y|3m|1m"),
     group_by: str           = Query("type", description="type|name|account"),
+    account:  Optional[str] = Query(None, description="계좌명 필터 (STOCK 전용)"),
     db: AsyncSession = Depends(get_db),
 ):
     """차트 집계 데이터. Forward Fill 후 group_by 기준으로 합산."""
     assets = await get_all_assets(db, asset_type=type)
+    if account:
+        assets = [
+            a for a in assets
+            if (a.get("detail") or {}).get("account_name") == account
+        ]
     return generate_chart_data(assets, period=period, group_by=group_by)
 
 

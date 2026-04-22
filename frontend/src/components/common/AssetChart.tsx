@@ -64,6 +64,7 @@ const FALLBACK_COLORS = ['#60a5fa', '#34d399', '#fb923c', '#c084fc', '#f87171', 
 interface AssetChartProps {
   type?:          AssetType
   groupBy?:       'type' | 'name' | 'account'
+  account?:       string
   height?:        number
   periodOptions?: Period[]
   defaultPeriod?: Period
@@ -80,18 +81,26 @@ function pivot(data: ChartDataPoint[]) {
 }
 
 function getLabels(data: ChartDataPoint[]): string[] {
-  return [...new Set(data.map((d) => d.label))]
+  const labels = [...new Set(data.map((d) => d.label))]
+  // 가장 최근 날짜 기준 값 합산 후 내림차순 정렬
+  const lastDate = data.reduce((max, d) => (d.date > max ? d.date : max), '')
+  const lastValues = new Map<string, number>()
+  for (const d of data) {
+    if (d.date === lastDate) lastValues.set(d.label, (lastValues.get(d.label) ?? 0) + d.value)
+  }
+  return labels.sort((a, b) => (lastValues.get(b) ?? 0) - (lastValues.get(a) ?? 0))
 }
 
 export default function AssetChart({
   type,
   groupBy = 'type',
+  account,
   height = 280,
   periodOptions,
   defaultPeriod = 'all',
 }: AssetChartProps) {
   const [period, setPeriod] = useState<Period>(defaultPeriod)
-  const { data = [], isLoading } = useChart({ type, period, group_by: groupBy })
+  const { data = [], isLoading } = useChart({ type, period, group_by: groupBy, account })
 
   if (isLoading) {
     return (

@@ -67,6 +67,7 @@ export interface ChartParams {
   type?:     AssetType
   period?:   'all' | '10y' | '3y' | '1y' | '3m' | '1m'
   group_by?: 'type' | 'name' | 'account'
+  account?:  string
 }
 
 export interface CategoryKpi {

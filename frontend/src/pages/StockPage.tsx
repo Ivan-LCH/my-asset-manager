@@ -103,7 +103,17 @@ export default function StockPage() {
           <h3 className="text-sm font-semibold text-gray-300 mb-4">
             📈 {activeAccount ? `${activeAccount} 성장 추이` : '전체 성장 추이'}
           </h3>
-          <AssetChart type="STOCK" groupBy="account" defaultPeriod="3y" height={200} />
+          {activeAccount ? (
+            <AssetChart
+              type="STOCK"
+              groupBy="name"
+              account={activeAccount}
+              defaultPeriod="3y"
+              height={200}
+            />
+          ) : (
+            <AssetChart type="STOCK" groupBy="account" defaultPeriod="3y" height={200} />
+          )}
         </div>
       )}
 

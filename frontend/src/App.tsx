@@ -6,6 +6,7 @@ import RealEstatePage from '@/pages/RealEstatePage'
 import AssetPage from '@/pages/AssetPage'
 import StockPage from '@/pages/StockPage'
 import PensionPage from '@/pages/PensionPage'
+import RetirementPage from '@/pages/RetirementPage'
 import Settings from '@/pages/Settings'
 
 const qc = new QueryClient()
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="savings"     element={<AssetPage type="SAVINGS" />} />
             <Route path="physical"    element={<AssetPage type="PHYSICAL" />} />
             <Route path="etc"         element={<AssetPage type="ETC" />} />
+            <Route path="retirement"  element={<RetirementPage />} />
             <Route path="settings"    element={<Settings />} />
             <Route path="*"           element={<Navigate to="/" replace />} />
           </Route>

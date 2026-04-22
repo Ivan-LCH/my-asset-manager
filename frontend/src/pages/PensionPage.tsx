@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Plus } from 'lucide-react'
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts'
 import { useAssets, useAssetsByType } from '@/hooks/useAssets'
 import { useSettings } from '@/hooks/useSettings'
@@ -11,44 +11,86 @@ import KpiCard from '@/components/common/KpiCard'
 import { formatMoney, formatManwon } from '@/lib/utils'
 import type { Asset, PensionDetail, StockDetail, SavingsDetail } from '@/types'
 
-interface SimRow { year: number; monthly: number; annual: number; sources: string[] }
+const SIM_START_YEAR = 2029
+const AREA_COLORS = ['#60a5fa', '#34d399', '#fb923c', '#c084fc', '#f87171', '#a3e635', '#fbbf24', '#22d3ee']
 
-function buildSimulation(assets: Asset[], currentAge: number, retirementAge: number): SimRow[] {
+interface SimRow { year: number; total: number; [source: string]: number }
+
+function buildSimulation(assets: Asset[], currentAge: number, retirementAge: number): {
+  rows: SimRow[]
+  sources: string[]
+} {
   const currentYear = new Date().getFullYear()
+  const startYear = Math.min(SIM_START_YEAR, currentYear + (retirementAge - currentAge))
+  const endYear = currentYear + (100 - currentAge)
+  const sourceSet = new Set<string>()
   const rows: SimRow[] = []
 
-  for (let age = retirementAge; age <= 100; age++) {
-    const year = currentYear + (age - currentAge)
-    let monthly = 0
-    const sources: string[] = []
+  for (let year = startYear; year <= endYear; year++) {
+    const row: SimRow = { year, total: 0 }
 
     for (const a of assets) {
-      // PENSION 자산
       if (a.type === 'PENSION') {
         const d = a.detail as PensionDetail | undefined
         if (!d) continue
         if (year >= d.expectedStartYear && year <= d.expectedEndYear) {
           const yearsElapsed = year - d.expectedStartYear
           const payout = d.expectedMonthlyPayout * Math.pow(1 + (d.annualGrowthRate ?? 0) / 100, yearsElapsed)
-          monthly += payout
-          sources.push(a.name)
+          row[a.name] = (row[a.name] ?? 0) + payout
+          row.total += payout
+          sourceSet.add(a.name)
         }
       }
-      // 연금형 STOCK / SAVINGS
       if (a.type === 'STOCK' || a.type === 'SAVINGS') {
         const d = a.detail as (StockDetail & SavingsDetail) | undefined
         if (!d?.isPensionLike) continue
         if (d.pensionStartYear && year >= d.pensionStartYear) {
-          monthly += d.pensionMonthly ?? 0
-          sources.push(a.name)
+          const payout = d.pensionMonthly ?? 0
+          row[a.name] = (row[a.name] ?? 0) + payout
+          row.total += payout
+          sourceSet.add(a.name)
         }
       }
     }
 
-    rows.push({ year, monthly, annual: monthly * 12, sources })
+    rows.push(row)
   }
 
-  return rows
+  return { rows, sources: Array.from(sourceSet) }
+}
+
+interface SimTooltipProps {
+  active?:  boolean
+  payload?: { name: string; value: number; color: string }[]
+  label?:   number
+}
+
+function SimTooltip({ active, payload, label }: SimTooltipProps) {
+  if (!active || !payload || payload.length === 0) return null
+  const total = payload.reduce((s, p) => s + (p.value ?? 0), 0)
+  const visible = payload.filter((p) => p.value > 0)
+  return (
+    <div className="bg-gray-900/95 border border-gray-700 rounded-xl p-3 shadow-2xl min-w-[180px]">
+      <p className="text-[11px] text-gray-400 mb-2 font-medium">{label}년</p>
+      <div className="space-y-1.5">
+        {visible.map((p) => (
+          <div key={p.name} className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
+              <span className="text-[11px] text-gray-300 truncate">{p.name}</span>
+            </div>
+            <span className="text-[11px] font-semibold text-gray-100 shrink-0">{formatManwon(p.value)}/월</span>
+          </div>
+        ))}
+      </div>
+      {visible.length > 1 && (
+        <div className="mt-2 pt-2 border-t border-gray-700 flex items-center justify-between">
+          <span className="text-[11px] text-gray-400">합계</span>
+          <span className="text-[12px] font-bold text-blue-400">{formatManwon(total)}/월</span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 export default function PensionPage() {
@@ -72,9 +114,10 @@ export default function PensionPage() {
     return false
   })
 
-  const simData = buildSimulation(pensionLikeAssets, currentAge, retirementAge)
-  const peakMonthly = Math.max(...simData.map((r) => r.monthly), 0)
-  const retirementRow = simData[0]
+  const { rows: simData, sources: simSources } = buildSimulation(pensionLikeAssets, currentAge, retirementAge)
+  const peakMonthly = Math.max(...simData.map((r) => r.total), 0)
+  const retirementYear = new Date().getFullYear() + (retirementAge - currentAge)
+  const retirementRow = simData.find((r) => r.year >= retirementYear)
 
   const active = pensionAssets.filter((a) => !a.disposalDate)
 
@@ -104,7 +147,7 @@ export default function PensionPage() {
       <div className="grid grid-cols-3 gap-4">
         <KpiCard
           label="은퇴 시 월 수령 (예상)"
-          value={retirementRow ? formatMoney(retirementRow.monthly) : '-'}
+          value={retirementRow ? formatMoney(retirementRow.total) : '-'}
           color="blue"
         />
         <KpiCard
@@ -124,39 +167,35 @@ export default function PensionPage() {
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-gray-300 mb-1">📊 연금 수령 시뮬레이션</h3>
           <p className="text-xs text-gray-500 mb-4">
-            은퇴 연령 {retirementAge}세 기준 · 현재 연령 {currentAge}세
+            은퇴 연령 {retirementAge}세 기준 · 현재 연령 {currentAge}세 · {SIM_START_YEAR}년부터 표시
           </p>
           <ResponsiveContainer width="100%" height={260}>
             <BarChart data={simData} margin={{ top: 4, right: 0, bottom: 0, left: 0 }}>
               <XAxis
                 dataKey="year"
-                tick={{ fill: '#6b7280', fontSize: 10 }}
+                tick={{ fill: '#6b7280', fontSize: 11 }}
                 tickLine={false} axisLine={false}
                 interval={4}
               />
               <YAxis
-                tick={{ fill: '#6b7280', fontSize: 10 }}
+                tick={{ fill: '#6b7280', fontSize: 11 }}
                 tickLine={false} axisLine={false}
                 tickFormatter={(v: number) => `${Math.round(v / 1000).toLocaleString()}천`}
                 width={52}
               />
-              <Tooltip
-                contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
-                formatter={(v: number, _name: string, props: { payload?: SimRow }) => [
-                  `${formatManwon(v)} / 월`,
-                  props.payload?.sources.join(', ') ?? '',
-                ]}
-                labelStyle={{ color: '#9ca3af', fontSize: 11 }}
-                labelFormatter={(year) => `${year}년`}
-              />
-              <Bar dataKey="monthly" radius={[3, 3, 0, 0]}>
-                {simData.map((row, i) => (
-                  <Cell
-                    key={i}
-                    fill={row.monthly >= peakMonthly * 0.9 ? '#60a5fa' : row.monthly > 0 ? '#3b82f6' : '#374151'}
-                  />
-                ))}
-              </Bar>
+              <Tooltip content={<SimTooltip />} />
+              {simSources.length > 1 && (
+                <Legend wrapperStyle={{ fontSize: 12, color: '#9ca3af', paddingTop: 8 }} />
+              )}
+              {simSources.map((src, i) => (
+                <Bar
+                  key={src}
+                  dataKey={src}
+                  stackId="1"
+                  fill={AREA_COLORS[i % AREA_COLORS.length]}
+                  radius={i === simSources.length - 1 ? [3, 3, 0, 0] : [0, 0, 0, 0]}
+                />
+              ))}
             </BarChart>
           </ResponsiveContainer>
         </div>

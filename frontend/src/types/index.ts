@@ -81,3 +81,17 @@ export interface Settings {
   retirementAge: number
   [key: string]: number | string
 }
+
+// ── 은퇴 계획 ──────────────────────────────────────────────
+export interface ExpenseItem  { id: string; name: string; amount: number }
+export interface TravelItem   { id: string; name: string; costPerTrip: number; phase1Times: number; phase1Until: number; phase2Times: number }
+export interface LumpsumItem  { id: string; name: string; receiveYear: number; amount: number; useEndYear: number }
+export interface EmergencyItem{ id: string; name: string; year: number; amount: number }
+
+export interface RetirementPlan {
+  expenses:       ExpenseItem[]
+  travel:         TravelItem[]
+  medicalMonthly: number
+  lumpsum:        LumpsumItem[]
+  emergency:      EmergencyItem[]
+}

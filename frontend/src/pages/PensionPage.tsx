@@ -126,7 +126,7 @@ export default function PensionPage() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-5xl mx-auto">
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-gray-100">🛡️ 연금</h2>
         <button

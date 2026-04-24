@@ -49,12 +49,23 @@ def normalize_ticker(ticker: str) -> str:
     return t
 
 
-def get_exchange_rate(currency: str) -> float:
-    """통화 → KRW 환율 조회"""
-    if currency == "KRW":
-        return 1.0
-    if currency in _RATE_CACHE:
-        return _RATE_CACHE[currency]
+def _fetch_rate_frankfurter(currency: str) -> float | None:
+    """frankfurter.app에서 환율 조회 (무료, API 키 불필요)"""
+    try:
+        url = f"https://api.frankfurter.app/latest?from={currency}&to=KRW"
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = json.loads(r.read())
+            rate = data.get("rates", {}).get("KRW")
+            if rate:
+                return float(rate)
+    except Exception as e:
+        print(f"⚠️ frankfurter 환율 조회 실패 ({currency}): {e}")
+    return None
+
+
+def _fetch_rate_yfinance(currency: str) -> float | None:
+    """yfinance에서 환율 조회 (fallback)"""
     try:
         ticker = f"{currency}KRW=X"
         dat    = yf.Ticker(ticker)
@@ -62,15 +73,45 @@ def get_exchange_rate(currency: str) -> float:
         if not rate:
             hist = dat.history(period="1d")
             if not hist.empty:
-                rate = hist["Close"].iloc[-1]
+                rate = float(hist["Close"].iloc[-1])
         if rate:
-            _RATE_CACHE[currency] = float(rate)
             return float(rate)
     except Exception as e:
-        print(f"⚠️ 환율 조회 실패 ({currency}): {e}")
-    # Fallback
+        print(f"⚠️ yfinance 환율 조회 실패 ({currency}): {e}")
+    return None
+
+
+def get_exchange_rate(currency: str) -> float:
+    """통화 → KRW 환율 조회 (frankfurter 우선, yfinance fallback)"""
+    if currency == "KRW":
+        return 1.0
+    if currency in _RATE_CACHE:
+        return _RATE_CACHE[currency]
+
+    rate = _fetch_rate_frankfurter(currency) or _fetch_rate_yfinance(currency)
+    if rate:
+        _RATE_CACHE[currency] = rate
+        print(f"💱 환율 조회: 1 {currency} = {rate:,.2f} KRW")
+        return rate
+
     fallback = {"USD": 1450.0, "JPY": 9.5}
-    return fallback.get(currency, 1.0)
+    rate = fallback.get(currency, 1.0)
+    _RATE_CACHE[currency] = rate
+    return rate
+
+
+async def save_exchange_rates_to_settings(db: AsyncSession):
+    """조회된 환율을 settings 테이블에 캐시 저장"""
+    from sqlalchemy import text as _text
+    for currency, rate in _RATE_CACHE.items():
+        if currency == "KRW":
+            continue
+        key = f"exchange_rate_{currency}"
+        await db.execute(
+            _text("INSERT INTO settings (key, value) VALUES (:k, :v) "
+                  "ON CONFLICT(key) DO UPDATE SET value = :v"),
+            {"k": key, "v": str(rate)},
+        )
 
 
 async def update_all_stocks(db: AsyncSession) -> dict:
@@ -230,5 +271,6 @@ async def update_all_stocks(db: AsyncSession) -> dict:
             print(f"❌ {ticker} 업데이트 실패: {e}")
             failed_tickers.append(ticker)
 
+    await save_exchange_rates_to_settings(db)
     print(f"✅ 업데이트 완료: {updated_count}개 자산, 실패: {failed_tickers}")
     return {"updated_count": updated_count, "failed_tickers": failed_tickers}

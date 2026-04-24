@@ -1,6 +1,6 @@
 import axios from 'axios'
 import { deepCamel, deepSnake } from './utils'
-import type { Asset, AssetType, ChartDataPoint, ChartParams, HistoryItem, Settings, RetirementPlan } from '@/types'
+import type { Asset, AssetType, ChartDataPoint, ChartParams, HistoryItem, Settings, RetirementPlan, DividendRecord, DividendSummary } from '@/types'
 
 const api = axios.create({
   baseURL: '/api',
@@ -68,4 +68,16 @@ export const settingsApi = {
 export const retirementApi = {
   get:  () => api.get<RetirementPlan>('/retirement').then((r) => r.data),
   save: (data: RetirementPlan) => api.put<{ message: string }>('/retirement', data).then((r) => r.data),
+}
+
+// ── Dividends ─────────────────────────────────────────────
+export const dividendApi = {
+  getByAsset:     (assetId: string) => api.get<DividendRecord[]>(`/dividends/${assetId}`).then((r) => r.data),
+  getSummary:     () => api.get<DividendSummary>('/dividends').then((r) => r.data),
+  add:            (assetId: string, data: Omit<DividendRecord, 'id' | 'assetId'>) =>
+                    api.post<{ id: number }>(`/dividends/${assetId}`, data).then((r) => r.data),
+  remove:         (assetId: string, id: number) =>
+                    api.delete(`/dividends/${assetId}/${id}`).then((r) => r.data),
+  updateSettings: (assetId: string, data: { dividendYield?: number; dividendDps?: number; dividendCycle?: string }) =>
+                    api.put(`/dividends/${assetId}/settings`, data).then((r) => r.data),
 }

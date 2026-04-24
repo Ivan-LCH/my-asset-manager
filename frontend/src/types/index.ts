@@ -23,6 +23,37 @@ export interface StockDetail {
   pensionStartYear?: number
   pensionMonthly?:   number
   ticker?:           string
+  dividendYield?:    number   // 배당수익률 (%)
+  dividendDps?:      number   // 주당 배당금 (KRW 환산)
+  dividendCycle?:    string   // 월|분기|반기|연간
+}
+
+export interface DividendRecord {
+  id:             number
+  assetId:        string
+  date:           string
+  amountKrw:      number
+  amountOriginal: number
+  currency:       string
+  exchangeRate:   number
+  memo:           string
+}
+
+export interface DividendSummary {
+  items: {
+    assetId:      string
+    name:         string
+    accountName:  string
+    currency:     string
+    exchangeRate: number
+    dividendYield: number
+    dividendDps:   number
+    dividendCycle: string
+    annualKrw:    number
+    monthlyKrw:   number
+  }[]
+  totalAnnual:  number
+  totalMonthly: number
 }
 
 export interface PensionDetail {
@@ -88,10 +119,24 @@ export interface TravelItem   { id: string; name: string; costPerTrip: number; p
 export interface LumpsumItem  { id: string; name: string; receiveYear: number; amount: number; useEndYear: number }
 export interface EmergencyItem{ id: string; name: string; year: number; amount: number }
 
+export interface HealthInsuranceInputs {
+  interestDividendIncome: number  // 이자·배당소득 (연, 수동입력)
+  pensionIncome:          number  // 연금소득 (연, 수동입력)
+  otherIncome:            number  // 기타소득 (연)
+  propertyTaxBase:        number  // 재산세 과세표준
+  rentalDeposit:          number  // 임차보증금 (전세 등)
+  carValue:               number  // 차량가액
+  scorePerPoint:          number  // 점수당 금액 (기본 208.4원)
+  autoLinkPension:        boolean // 연금 시뮬레이션 자동 연동
+  autoLinkDividend:       boolean // 배당금 자동 연동
+}
+
 export interface RetirementPlan {
-  expenses:       ExpenseItem[]
-  travel:         TravelItem[]
-  medicalMonthly: number
-  lumpsum:        LumpsumItem[]
-  emergency:      EmergencyItem[]
+  expenses:        ExpenseItem[]
+  travel:          TravelItem[]
+  medicalMonthly:  number
+  lumpsum:         LumpsumItem[]
+  emergency:       EmergencyItem[]
+  retirementYear:  number
+  healthInsurance: HealthInsuranceInputs
 }

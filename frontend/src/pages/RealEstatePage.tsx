@@ -29,7 +29,7 @@ export default function RealEstatePage() {
   if (isLoading) return <div className="flex items-center justify-center h-64 text-gray-400">로딩 중...</div>
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold text-gray-100">🏠 부동산</h2>
         <button

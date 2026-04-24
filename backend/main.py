@@ -12,6 +12,7 @@ from backend.api.history   import router as history_router
 from backend.api.stocks    import router as stocks_router
 from backend.api.settings   import router as settings_router
 from backend.api.retirement import router as retirement_router
+from backend.api.dividends  import router as dividends_router
 
 
 @asynccontextmanager
@@ -41,6 +42,7 @@ app.include_router(history_router, prefix="/api")
 app.include_router(stocks_router,  prefix="/api")
 app.include_router(settings_router,   prefix="/api")
 app.include_router(retirement_router, prefix="/api")
+app.include_router(dividends_router,  prefix="/api")
 
 
 @app.get("/api/health")

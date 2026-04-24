@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { RefreshCw, Plus, TrendingUp, TrendingDown, Minus, ChevronRight } from 'lucide-react'
 import { useAssets, useAssetsByType } from '@/hooks/useAssets'
 import { useUpdateStocks } from '@/hooks/useStocks'
+import { useDividendSummary } from '@/hooks/useDividends'
 import AssetCreateForm from '@/components/assets/AssetCreateForm'
 import AssetChart from '@/components/common/AssetChart'
 import AssetModal from '@/components/common/AssetModal'
@@ -13,6 +14,7 @@ export default function StockPage() {
   const assets = useAssetsByType('STOCK')
   const { isLoading } = useAssets()
   const updateMut = useUpdateStocks()
+  const { data: divSummary } = useDividendSummary()
 
   // 계좌별 뷰: null=계좌 목록, string=선택된 계좌명
   const [activeAccount, setActiveAccount] = useState<string | null>(null)
@@ -43,7 +45,7 @@ export default function StockPage() {
   if (isLoading) return <div className="flex items-center justify-center h-64 text-gray-400">로딩 중...</div>
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 space-y-5 max-w-7xl mx-auto">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -87,7 +89,7 @@ export default function StockPage() {
       )}
 
       {/* KPI */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard label="평가 총액" value={formatMoney(totalVal)} color="default" />
         <KpiCard
           label="평가 손익"
@@ -95,6 +97,12 @@ export default function StockPage() {
           color={pnl >= 0 ? 'green' : 'red'}
         />
         <KpiCard label="투자 원금" value={formatMoney(totalCost)} color="default" />
+        <KpiCard
+          label="연간 예상 배당"
+          value={divSummary ? formatManwon(divSummary.totalAnnual) : '-'}
+          color="blue"
+          sub={divSummary ? `월 ${formatManwon(divSummary.totalMonthly)}` : undefined}
+        />
       </div>
 
       {/* 성장 추이 차트 */}

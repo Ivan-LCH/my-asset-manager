@@ -3,6 +3,7 @@ import { ChevronDown, ChevronUp, Trash2, Pencil } from 'lucide-react'
 import KpiCard from '@/components/common/KpiCard'
 import HistoryTable from './HistoryTable'
 import AssetForm from './AssetForm'
+import DividendSection from './DividendSection'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
 import { useDeleteAsset } from '@/hooks/useAssets'
 import { formatMoney, formatManwon, formatPnl, TYPE_LABELS } from '@/lib/utils'
@@ -16,9 +17,12 @@ interface Props {
   chartData?: { date: string; value: number }[]
 }
 
+type Tab = 'info' | 'dividend'
+
 export default function AssetDetail({ asset, chartData }: Props) {
   const [showForm,   setShowForm]   = useState(false)
   const [confirmDel, setConfirmDel] = useState(false)
+  const [tab,        setTab]        = useState<Tab>('info')
   const deleteMut = useDeleteAsset()
 
   const a     = asset
@@ -62,9 +66,32 @@ export default function AssetDetail({ asset, chartData }: Props) {
 
   return (
     <div className="space-y-5">
+      {/* 주식 전용 탭 */}
+      {asset.type === 'STOCK' && (
+        <div className="flex gap-1 border-b border-gray-700 pb-0">
+          {(['info', 'dividend'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-4 py-2 text-xs font-medium rounded-t-lg transition-colors ${
+                tab === t
+                  ? 'bg-gray-700 text-blue-400 border-b-2 border-blue-400'
+                  : 'text-gray-500 hover:text-gray-300'
+              }`}
+            >
+              {t === 'info' ? '📋 기본 정보' : '💵 배당금'}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* 기본 정보 그리드 */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      {/* 배당 탭 */}
+      {asset.type === 'STOCK' && tab === 'dividend' && (
+        <DividendSection asset={asset} />
+      )}
+
+      {/* 기본 정보 (info 탭 또는 비주식 자산) */}
+      {(asset.type !== 'STOCK' || tab === 'info') && <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <InfoCell
           label={a.type === 'REAL_ESTATE' ? '주소' : a.type === 'STOCK' ? '계좌' : '유형'}
           value={
@@ -117,17 +144,17 @@ export default function AssetDetail({ asset, chartData }: Props) {
             <p className="text-blue-400 font-semibold">{d?.annualGrowthRate ?? 0}%</p>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* KPI 카드 */}
-      <div className="grid grid-cols-3 gap-3">
+      {(asset.type !== 'STOCK' || tab === 'info') && <div className="grid grid-cols-3 gap-3">
         <KpiCard label={k1} value={v1} color={c1} />
         <KpiCard label={k2} value={v2} color={c2} />
         <KpiCard label={k3} value={v3} color={c3} />
-      </div>
+      </div>}
 
       {/* 미니 차트 */}
-      {miniChart.length > 1 && (
+      {(asset.type !== 'STOCK' || tab === 'info') && miniChart.length > 1 && (
         <div className="bg-gray-700/30 rounded-xl p-4">
           <p className="text-xs text-gray-400 mb-3 font-medium">가치 변동 추이</p>
           <ResponsiveContainer width="100%" height={140}>
@@ -167,7 +194,7 @@ export default function AssetDetail({ asset, chartData }: Props) {
       )}
 
       {/* 이력 테이블 */}
-      <HistoryTable asset={asset} />
+      {(asset.type !== 'STOCK' || tab === 'info') && <HistoryTable asset={asset} />}
 
       {/* 액션 버튼 */}
       <div className="flex gap-2 pt-1 border-t border-gray-700/50">

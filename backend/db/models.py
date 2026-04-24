@@ -63,6 +63,9 @@ class StockDetail(Base):
     pension_start_year = Column(Integer)
     pension_monthly    = Column(Float)
     ticker             = Column(String)                  # Yahoo Finance ticker
+    dividend_yield     = Column(Float,   default=0)      # 배당수익률 (%)
+    dividend_dps       = Column(Float,   default=0)      # 주당 배당금 (원화)
+    dividend_cycle     = Column(String,  default="연간")  # 월|분기|반기|연간
 
     asset = relationship("Asset", back_populates="stock")
 
@@ -78,6 +81,19 @@ class PensionDetail(Base):
     annual_growth_rate      = Column(Float,   default=0) # 연 증가율 (%)
 
     asset = relationship("Asset", back_populates="pension")
+
+
+class DividendHistory(Base):
+    __tablename__ = "dividend_history"
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    asset_id        = Column(String,  ForeignKey("assets.id", ondelete="CASCADE"), nullable=False)
+    date            = Column(String,  nullable=False)   # YYYY-MM-DD
+    amount_krw      = Column(Float,   nullable=False)   # KRW 환산 금액
+    amount_original = Column(Float,   default=0)        # 원화 환산 전 외화 금액
+    currency        = Column(String,  default="KRW")
+    exchange_rate   = Column(Float,   default=1.0)
+    memo            = Column(String,  default="")
 
 
 class SavingsDetail(Base):

@@ -3,10 +3,12 @@ import { Plus, Trash2, RotateCcw, Save } from 'lucide-react'
 import { useAssets } from '@/hooks/useAssets'
 import { useSettings } from '@/hooks/useSettings'
 import { useRetirement, useSaveRetirement } from '@/hooks/useRetirement'
+import { useDividendSummary } from '@/hooks/useDividends'
 import { formatMoney, formatManwon } from '@/lib/utils'
 import type {
   Asset, PensionDetail, StockDetail, SavingsDetail,
   RetirementPlan, ExpenseItem, TravelItem, LumpsumItem, EmergencyItem,
+  HealthInsuranceInputs,
 } from '@/types'
 
 // ── 연금 시뮬레이션 (PensionPage와 동일 로직) ──────────────
@@ -38,6 +40,89 @@ function calcPensionByYear(assets: Asset[], currentAge: number): Map<number, num
   return map
 }
 
+// ── 건강보험료 계산 (2025년 지역가입자 기준) ───────────────
+// 재산 점수표: 재산세 과세표준 5,000만원 공제 후 구간별 점수 (단위: 만원)
+const PROPERTY_SCORE_TABLE: [number, number][] = [
+  [0,      22],  [450,    30],  [900,    40],  [1_350,  50],
+  [1_800,  65],  [2_400,  80],  [3_000,  95],  [3_600, 113],
+  [4_800, 133],  [6_000, 165],  [9_000, 205],  [12_000, 248],
+  [15_000, 290], [18_000, 330], [21_000, 369], [24_000, 406],
+  [27_000, 441], [30_000, 484], [36_000, 530], [42_000, 571],
+  [48_000, 610], [54_000, 645],
+]
+
+function getPropertyScore(taxBase: number): number {
+  const baseMan = taxBase / 10_000
+  const deducted = Math.max(0, baseMan - 5_000) // 5천만원 공제
+  for (let i = PROPERTY_SCORE_TABLE.length - 1; i >= 0; i--) {
+    if (deducted >= PROPERTY_SCORE_TABLE[i][0]) return PROPERTY_SCORE_TABLE[i][1]
+  }
+  return 0
+}
+
+interface HealthResult {
+  incomeMonthly:    number  // 소득보험료
+  propertyMonthly:  number  // 재산보험료
+  carMonthly:       number  // 자동차보험료
+  healthTotal:      number  // 건강보험료 합계
+  longTermCare:     number  // 장기요양보험료
+  grandTotal:       number  // 최종 납부액
+  isMinimum:        boolean // 최저보험료 적용 여부
+}
+
+function calcHealthInsurance(
+  hi: HealthInsuranceInputs,
+  pensionAutoMonthly: number,  // 연금 자동연동 값 (월)
+  dividendAutoMonthly: number, // 배당 자동연동 값 (월)
+): HealthResult {
+  const RATE          = 0.0709   // 보험료율 7.09%
+  const SCORE_PER_PT  = hi.scorePerPoint || 208.4
+  const LONG_TERM     = 0.1295   // 장기요양보험료율 12.95%
+  const MIN_HEALTH    = 19_780   // 최저 건강보험료 (월)
+
+  // 소득 합산 (연간, 반영률 적용)
+  const pensionAnnual   = hi.autoLinkPension   ? pensionAutoMonthly * 12   : hi.pensionIncome
+  const dividendAnnual  = hi.autoLinkDividend  ? dividendAutoMonthly * 12  : hi.interestDividendIncome
+  const totalIncome = dividendAnnual * 1.0   // 이자·배당 100%
+                    + pensionAnnual   * 0.5   // 연금소득 50%
+                    + hi.otherIncome  * 1.0   // 기타 100%
+
+  const incomeMonthly = totalIncome > 0 ? (totalIncome / 12) * RATE : 0
+
+  // 재산 점수 (임차보증금 30% 반영)
+  const propertyBase    = hi.propertyTaxBase + hi.rentalDeposit * 0.3
+  const propertyScore   = getPropertyScore(propertyBase)
+  const propertyMonthly = propertyScore * SCORE_PER_PT
+
+  // 자동차 (사용연수 무관, 4천만원 이상만 단순 계산 — 점수표 간소화)
+  let carMonthly = 0
+  if (hi.carValue >= 40_000_000) {
+    const carScore = hi.carValue < 60_000_000 ? 45
+                   : hi.carValue < 80_000_000 ? 62 : 80
+    carMonthly = carScore * SCORE_PER_PT
+  }
+
+  const rawHealth   = incomeMonthly + propertyMonthly + carMonthly
+  const isMinimum   = rawHealth < MIN_HEALTH
+  const healthTotal = Math.max(rawHealth, MIN_HEALTH)
+  const longTermCare = Math.round(healthTotal * LONG_TERM)
+  const grandTotal  = Math.round(healthTotal) + longTermCare
+
+  return { incomeMonthly, propertyMonthly, carMonthly, healthTotal, longTermCare, grandTotal, isMinimum }
+}
+
+const DEFAULT_HI: HealthInsuranceInputs = {
+  interestDividendIncome: 0,
+  pensionIncome:          0,
+  otherIncome:            0,
+  propertyTaxBase:        0,
+  rentalDeposit:          0,
+  carValue:               0,
+  scorePerPoint:          208.4,
+  autoLinkPension:        true,
+  autoLinkDividend:       true,
+}
+
 // ── 기본값 (2인 가구) ──────────────────────────────────────
 const uid = () => Math.random().toString(36).slice(2, 9)
 
@@ -53,11 +138,13 @@ const DEFAULT_EXPENSES: ExpenseItem[] = [
 ]
 
 const EMPTY_PLAN: RetirementPlan = {
-  expenses: DEFAULT_EXPENSES,
-  travel: [],
-  medicalMonthly: 200_000,
-  lumpsum: [],
-  emergency: [],
+  expenses:        DEFAULT_EXPENSES,
+  travel:          [],
+  medicalMonthly:  200_000,
+  lumpsum:         [],
+  emergency:       [],
+  retirementYear:  new Date().getFullYear() + 10,
+  healthInsurance: DEFAULT_HI,
 }
 
 // ── 유틸 ───────────────────────────────────────────────────
@@ -354,26 +441,200 @@ function EmergencySection({
   )
 }
 
+// ── 건강보험료 계산기 섹션 ─────────────────────────────────
+function HealthInsuranceSection({
+  hi, onChange, result, pensionAutoMonthly, dividendAutoMonthly,
+}: {
+  hi: HealthInsuranceInputs
+  onChange: (v: HealthInsuranceInputs) => void
+  result: HealthResult
+  pensionAutoMonthly: number
+  dividendAutoMonthly: number
+}) {
+  const set = (field: keyof HealthInsuranceInputs, val: number | boolean) =>
+    onChange({ ...hi, [field]: val })
+
+  return (
+    <Section title="🏥 건강보험료 계산 (지역가입자)">
+      <p className="text-[11px] text-gray-500 -mt-1">
+        2025년 기준 · 점수당 {hi.scorePerPoint}원 · 결과는 예측값이며 실제와 차이가 있을 수 있습니다
+      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* 소득 입력 */}
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-400">소득 (연간)</p>
+
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 w-36 shrink-0">
+              <input
+                type="checkbox"
+                checked={hi.autoLinkDividend}
+                onChange={(e) => set('autoLinkDividend', e.target.checked)}
+                className="rounded"
+              />
+              배당소득 자동연동
+            </label>
+            {hi.autoLinkDividend ? (
+              <span className="text-xs text-blue-400 font-medium">
+                {formatManwon(dividendAutoMonthly * 12)}/년 (자동)
+              </span>
+            ) : (
+              <div className="flex-1">
+                <AmountInput
+                  value={hi.interestDividendIncome}
+                  onChange={(v) => set('interestDividendIncome', v)}
+                  placeholder="이자·배당소득 (연)"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 text-xs text-gray-400 w-36 shrink-0">
+              <input
+                type="checkbox"
+                checked={hi.autoLinkPension}
+                onChange={(e) => set('autoLinkPension', e.target.checked)}
+                className="rounded"
+              />
+              연금소득 자동연동
+            </label>
+            {hi.autoLinkPension ? (
+              <span className="text-xs text-blue-400 font-medium">
+                {formatManwon(pensionAutoMonthly * 12)}/년 (자동) · 50% 반영
+              </span>
+            ) : (
+              <div className="flex-1">
+                <AmountInput
+                  value={hi.pensionIncome}
+                  onChange={(v) => set('pensionIncome', v)}
+                  placeholder="연금소득 (연)"
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-36 shrink-0">기타소득 (연)</span>
+            <div className="flex-1">
+              <AmountInput
+                value={hi.otherIncome}
+                onChange={(v) => set('otherIncome', v)}
+                placeholder="사업·기타소득"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* 재산·차량 입력 */}
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-400">재산 · 자동차</p>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-36 shrink-0">재산세 과세표준</span>
+            <div className="flex-1">
+              <AmountInput
+                value={hi.propertyTaxBase}
+                onChange={(v) => set('propertyTaxBase', v)}
+                placeholder="토지·건물·주택 합산"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-36 shrink-0">임차보증금</span>
+            <div className="flex-1">
+              <AmountInput
+                value={hi.rentalDeposit}
+                onChange={(v) => set('rentalDeposit', v)}
+                placeholder="전세·보증금 (30% 반영)"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-36 shrink-0">차량가액</span>
+            <div className="flex-1">
+              <AmountInput
+                value={hi.carValue}
+                onChange={(v) => set('carValue', v)}
+                placeholder="4천만원 이상 시 부과"
+              />
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-400 w-36 shrink-0">점수당 금액 (원)</span>
+            <input
+              type="number"
+              step="0.1"
+              className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-gray-100
+                focus:outline-none focus:border-blue-500 text-right"
+              value={hi.scorePerPoint}
+              onChange={(e) => set('scorePerPoint', parseFloat(e.target.value) || 208.4)}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* 계산 결과 */}
+      <div className={`rounded-xl p-4 ${result.isMinimum ? 'bg-yellow-500/10 border border-yellow-500/30' : 'bg-blue-500/10 border border-blue-500/20'}`}>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          <div>
+            <p className="text-gray-500 mb-0.5">소득 보험료</p>
+            <p className="font-semibold text-gray-200">{formatManwon(result.incomeMonthly)}/월</p>
+          </div>
+          <div>
+            <p className="text-gray-500 mb-0.5">재산 보험료</p>
+            <p className="font-semibold text-gray-200">{formatManwon(result.propertyMonthly)}/월</p>
+          </div>
+          <div>
+            <p className="text-gray-500 mb-0.5">장기요양보험료</p>
+            <p className="font-semibold text-gray-200">{formatManwon(result.longTermCare)}/월</p>
+          </div>
+          <div>
+            <p className="text-gray-500 mb-0.5">
+              월 총 납부액
+              {result.isMinimum && <span className="ml-1 text-yellow-400">(최저)</span>}
+            </p>
+            <p className="text-lg font-bold text-blue-400">{formatManwon(result.grandTotal)}/월</p>
+          </div>
+        </div>
+        {result.isMinimum && (
+          <p className="text-[11px] text-yellow-500 mt-2">
+            ※ 산출된 보험료가 최저보험료(19,780원)보다 낮아 최저보험료가 적용됩니다.
+          </p>
+        )}
+      </div>
+    </Section>
+  )
+}
+
 // ── 연도별 현금흐름 테이블 ─────────────────────────────────
 interface CashFlowRow {
-  year:            number
-  age:             number
-  pensionMonthly:  number
-  expenseMonthly:  number
-  travelMonthly:   number
-  medicalMonthly:  number
-  totalExpense:    number
-  lumpsumMonthly:  number
-  totalIncome:     number
-  balance:         number
-  emergencyAnnual: number
-  cumulative:      number  // 누적자금 (전년도 이월 + 당해 연간여유 - 긴급지출)
+  year:                    number
+  age:                     number
+  pensionMonthly:          number
+  dividendMonthly:         number
+  expenseMonthly:          number
+  travelMonthly:           number
+  medicalMonthly:          number
+  healthInsuranceMonthly:  number
+  totalExpense:            number
+  lumpsumMonthly:          number
+  totalIncome:             number
+  balance:                 number
+  emergencyAnnual:         number
+  cumulative:              number
 }
 
 function buildCashFlow(
   plan: RetirementPlan,
   pensionMap: Map<number, number>,
   currentAge: number,
+  dividendMonthly: number,
+  healthInsuranceMonthly: number,
 ): CashFlowRow[] {
   const currentYear = new Date().getFullYear()
   const endYear = currentYear + (100 - currentAge)
@@ -403,17 +664,17 @@ function buildCashFlow(
 
     const emergencyAnnual = plan.emergency.reduce((s, e) => (e.year === year ? s + e.amount : s), 0)
 
-    const totalExpense = expenseMonthly + travelMonthly + plan.medicalMonthly
-    const totalIncome  = pensionMonthly + lumpsumMonthly
+    const totalExpense = expenseMonthly + travelMonthly + plan.medicalMonthly + healthInsuranceMonthly
+    const totalIncome  = pensionMonthly + lumpsumMonthly + dividendMonthly
     const balance      = totalIncome - totalExpense
 
-    // 누적자금: 월 여유/부족 × 12 - 긴급지출
     cumulative += balance * 12 - emergencyAnnual
 
     rows.push({
       year, age,
-      pensionMonthly, expenseMonthly, travelMonthly,
+      pensionMonthly, dividendMonthly, expenseMonthly, travelMonthly,
       medicalMonthly: plan.medicalMonthly,
+      healthInsuranceMonthly,
       totalExpense, lumpsumMonthly, totalIncome, balance,
       emergencyAnnual, cumulative,
     })
@@ -428,10 +689,9 @@ export default function RetirementPage() {
   const { data: saved }          = useRetirement()
   const saveMut                  = useSaveRetirement()
 
-  const currentAge    = settings?.currentAge    ?? 40
-  const retirementAge = settings?.retirementAge ?? 65
+  const currentAge = settings?.currentAge ?? 40
 
-  const [plan, setPlan] = useState<RetirementPlan>(EMPTY_PLAN)
+  const [plan, setPlan]   = useState<RetirementPlan>(EMPTY_PLAN)
   const [dirty, setDirty] = useState(false)
 
   // 저장된 데이터 로드
@@ -443,6 +703,8 @@ export default function RetirementPage() {
         medicalMonthly: saved.medicalMonthly ?? 200_000,
         lumpsum:        saved.lumpsum        ?? [],
         emergency:      saved.emergency      ?? [],
+        retirementYear:  saved.retirementYear  ?? new Date().getFullYear() + 10,
+        healthInsurance: saved.healthInsurance  ? { ...DEFAULT_HI, ...saved.healthInsurance } : DEFAULT_HI,
       })
     }
   }, [saved])
@@ -462,21 +724,48 @@ export default function RetirementPage() {
     if ((a.type === 'STOCK' || a.type === 'SAVINGS') && (a.detail as StockDetail & SavingsDetail)?.isPensionLike) return true
     return false
   })
+  const { data: divSummary } = useDividendSummary()
+  const dividendMonthly = divSummary?.totalMonthly ?? 0
+
   const pensionMap = calcPensionByYear(pensionLikeAssets, currentAge)
-  const cashFlow   = buildCashFlow(plan, pensionMap, currentAge)
+
+  // 건강보험료 계산 (은퇴 시점 기준 연금 수입 기준)
+  const retirementYear    = plan.retirementYear
+  const retirementPensionMonthly = pensionMap.get(retirementYear) ?? 0
+  const hiResult = calcHealthInsurance(
+    plan.healthInsurance,
+    retirementPensionMonthly,
+    dividendMonthly,
+  )
+  const healthInsuranceMonthly = hiResult.grandTotal
+
+  const cashFlow = buildCashFlow(plan, pensionMap, currentAge, dividendMonthly, healthInsuranceMonthly)
 
   // KPI
-  const retirementYear = new Date().getFullYear() + (retirementAge - currentAge)
-  const retirementRow  = cashFlow.find((r) => r.year >= retirementYear)
+  const retirementRow = cashFlow.find((r) => r.year >= retirementYear)
   const totalExpenseMonthly = (plan.expenses.reduce((s, e) => s + e.amount, 0))
     + plan.travel.reduce((s, t) => s + (t.phase1Times * t.costPerTrip) / 12, 0)
     + plan.medicalMonthly
+    + healthInsuranceMonthly
 
   return (
-    <div className="p-4 md:p-6 space-y-5 max-w-5xl mx-auto">
+    <div className="p-4 md:p-6 space-y-5 max-w-screen-xl mx-auto">
       {/* 헤더 */}
       <div className="flex items-center justify-between">
-        <h2 className="text-xl font-bold text-gray-100">🌅 은퇴 생활비 계획</h2>
+        <div className="flex items-center gap-4">
+          <h2 className="text-xl font-bold text-gray-100">🌅 은퇴 생활비 계획</h2>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-gray-400">은퇴 예상 연도</span>
+            <input
+              type="number"
+              className="w-24 bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-blue-300
+                font-semibold focus:outline-none focus:border-blue-500 text-center"
+              value={plan.retirementYear || ''}
+              onChange={(e) => { update('retirementYear', Number(e.target.value)); }}
+            />
+            <span className="text-sm text-gray-500">년</span>
+          </div>
+        </div>
         <button
           onClick={handleSave}
           disabled={!dirty || saveMut.isPending}
@@ -500,7 +789,7 @@ export default function RetirementPage() {
           <p className="text-lg font-bold text-gray-100">
             {retirementRow ? formatManwon(retirementRow.pensionMonthly) : '-'}
           </p>
-          <p className="text-[11px] text-gray-600 mt-0.5">{retirementAge}세 ({retirementYear}년)</p>
+          <p className="text-[11px] text-gray-600 mt-0.5">{retirementYear}년 기준</p>
         </div>
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
           <p className="text-xs text-gray-500 mb-1">은퇴 시 월 여유/부족</p>
@@ -540,6 +829,15 @@ export default function RetirementPage() {
         <EmergencySection items={plan.emergency} onChange={(v) => update('emergency', v)} />
       </div>
 
+      {/* 건강보험료 계산기 */}
+      <HealthInsuranceSection
+        hi={plan.healthInsurance}
+        onChange={(v) => update('healthInsurance', v)}
+        result={hiResult}
+        pensionAutoMonthly={retirementPensionMonthly}
+        dividendAutoMonthly={dividendMonthly}
+      />
+
       {/* 연도별 현금흐름 테이블 */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
         <h3 className="text-sm font-semibold text-gray-300 mb-4">📊 연도별 현금흐름</h3>
@@ -550,11 +848,13 @@ export default function RetirementPage() {
                 <th className="text-left py-2 pr-3 font-medium">연도</th>
                 <th className="text-right py-2 px-2 font-medium">나이</th>
                 <th className="text-right py-2 px-2 font-medium">연금/월</th>
+                <th className="text-right py-2 px-2 font-medium">배당/월</th>
                 <th className="text-right py-2 px-2 font-medium">목돈/월</th>
                 <th className="text-right py-2 px-2 font-medium">총수입/월</th>
                 <th className="text-right py-2 px-2 font-medium">생활비/월</th>
                 <th className="text-right py-2 px-2 font-medium">여행/월</th>
                 <th className="text-right py-2 px-2 font-medium">의료/월</th>
+                <th className="text-right py-2 px-2 font-medium">건보/월</th>
                 <th className="text-right py-2 px-2 font-medium">총지출/월</th>
                 <th className="text-right py-2 px-2 font-medium">여유/부족</th>
                 <th className="text-right py-2 px-2 font-medium">긴급지출</th>
@@ -580,6 +880,9 @@ export default function RetirementPage() {
                     <td className="text-right py-2 px-2 text-gray-300">
                       {row.pensionMonthly > 0 ? formatManwon(row.pensionMonthly) : '—'}
                     </td>
+                    <td className="text-right py-2 px-2 text-emerald-400">
+                      {row.dividendMonthly > 0 ? formatManwon(row.dividendMonthly) : '—'}
+                    </td>
                     <td className="text-right py-2 px-2 text-gray-300">
                       {row.lumpsumMonthly > 0 ? formatManwon(row.lumpsumMonthly) : '—'}
                     </td>
@@ -592,6 +895,9 @@ export default function RetirementPage() {
                     </td>
                     <td className="text-right py-2 px-2 text-gray-400">
                       {row.medicalMonthly > 0 ? formatManwon(row.medicalMonthly) : '—'}
+                    </td>
+                    <td className="text-right py-2 px-2 text-gray-400">
+                      {row.healthInsuranceMonthly > 0 ? formatManwon(row.healthInsuranceMonthly) : '—'}
                     </td>
                     <td className="text-right py-2 px-2 font-semibold text-gray-100">
                       {formatManwon(row.totalExpense)}

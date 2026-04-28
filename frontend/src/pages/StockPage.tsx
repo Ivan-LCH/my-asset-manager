@@ -3,18 +3,33 @@ import { RefreshCw, Plus, TrendingUp, TrendingDown, Minus, ChevronRight } from '
 import { useAssets, useAssetsByType } from '@/hooks/useAssets'
 import { useUpdateStocks } from '@/hooks/useStocks'
 import { useDividendSummary } from '@/hooks/useDividends'
+import { useSettings } from '@/hooks/useSettings'
 import AssetCreateForm from '@/components/assets/AssetCreateForm'
 import AssetChart from '@/components/common/AssetChart'
 import AssetModal from '@/components/common/AssetModal'
 import KpiCard from '@/components/common/KpiCard'
-import { formatMoney, formatManwon, formatPnl } from '@/lib/utils'
-import type { Asset, StockDetail } from '@/types'
+import { formatMoney, formatManwon, formatPnl, formatAvgPrice, formatPrice } from '@/lib/utils'
+import type { Asset, Settings, StockDetail } from '@/types'
+
+// exchange_rate_USD → deepCamel → "exchangeRate_USD"
+function getRate(settings: Settings | undefined, currency?: string): number {
+  if (!currency || currency === 'KRW') return 1
+  return (settings?.[`exchangeRate_${currency}`] as number) ?? 1
+}
+
+// acquisitionPrice = 주식 네이티브 통화 기준 (USD 주식 → USD, KRW 주식 → KRW)
+function costKrw(asset: Asset, settings: Settings | undefined): number {
+  const d    = asset.detail as StockDetail | undefined
+  const rate = getRate(settings, d?.currency)
+  return (asset.acquisitionPrice ?? 0) * (asset.quantity ?? 0) * rate
+}
 
 export default function StockPage() {
   const assets = useAssetsByType('STOCK')
   const { isLoading } = useAssets()
   const updateMut = useUpdateStocks()
   const { data: divSummary } = useDividendSummary()
+  const { data: settings }   = useSettings()
 
   // 계좌별 뷰: null=계좌 목록, string=선택된 계좌명
   const [activeAccount, setActiveAccount] = useState<string | null>(null)
@@ -27,7 +42,7 @@ export default function StockPage() {
   const sold   = assets.filter((a) => !!a.disposalDate)
 
   const totalVal  = active.reduce((s, a) => s + a.currentValue, 0)
-  const totalCost = active.reduce((s, a) => s + (a.acquisitionPrice ?? 0) * (a.quantity ?? 0), 0)
+  const totalCost = active.reduce((s, a) => s + costKrw(a, settings), 0)
   const pnl = totalVal - totalCost
   const roi = totalCost > 0 ? (pnl / totalCost) * 100 : 0
 
@@ -137,6 +152,7 @@ export default function StockPage() {
                     key={acct}
                     name={acct}
                     stocks={stocks}
+                    settings={settings}
                     onClick={() => setActiveAccount(acct)}
                   />
                 ))}
@@ -149,7 +165,7 @@ export default function StockPage() {
               <h3 className="text-sm font-semibold text-gray-400">매각 완료 ({sold.length})</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 opacity-55">
                 {sold.map((a) => (
-                  <StockTile key={a.id} asset={a} onClick={() => setModalId(a.id)} />
+                  <StockTile key={a.id} asset={a} settings={settings} onClick={() => setModalId(a.id)} />
                 ))}
               </div>
             </section>
@@ -170,6 +186,7 @@ export default function StockPage() {
           <AccountSummaryBanner
             name={activeAccount}
             stocks={currentStocks}
+            settings={settings}
             onBack={() => setActiveAccount(null)}
           />
 
@@ -180,7 +197,7 @@ export default function StockPage() {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {currentStocks.map((a) => (
-                <StockTile key={a.id} asset={a} onClick={() => setModalId(a.id)} />
+                <StockTile key={a.id} asset={a} settings={settings} onClick={() => setModalId(a.id)} />
               ))}
             </div>
           </section>
@@ -195,14 +212,15 @@ export default function StockPage() {
 
 /* ── 계좌 카드 ── */
 function AccountCard({
-  name, stocks, onClick,
+  name, stocks, settings, onClick,
 }: {
   name: string
   stocks: Asset[]
+  settings: Settings | undefined
   onClick: () => void
 }) {
   const val  = stocks.reduce((s, a) => s + a.currentValue, 0)
-  const cost = stocks.reduce((s, a) => s + (a.acquisitionPrice ?? 0) * (a.quantity ?? 0), 0)
+  const cost = stocks.reduce((s, a) => s + costKrw(a, settings), 0)
   const pnl  = val - cost
   const roi  = cost > 0 ? (pnl / cost) * 100 : 0
   const topStocks = stocks.slice(0, 3)
@@ -246,9 +264,9 @@ function AccountCard({
       {/* 보유 종목 미리보기 */}
       <div className="border-t border-gray-700/50 pt-3 space-y-1">
         {topStocks.map((a) => {
-          const aPnl = a.currentValue - (a.acquisitionPrice ?? 0) * (a.quantity ?? 0)
-          const aRoi = (a.acquisitionPrice ?? 0) * (a.quantity ?? 0) > 0
-            ? (aPnl / ((a.acquisitionPrice ?? 0) * (a.quantity ?? 0))) * 100 : 0
+          const aCost = costKrw(a, settings)
+          const aPnl  = a.currentValue - aCost
+          const aRoi  = aCost > 0 ? (aPnl / aCost) * 100 : 0
           return (
             <div key={a.id} className="flex items-center justify-between text-xs">
               <span className="text-gray-400 truncate max-w-[120px]">{a.name}</span>
@@ -271,14 +289,15 @@ function AccountCard({
 
 /* ── 계좌 선택 후 요약 배너 ── */
 function AccountSummaryBanner({
-  name, stocks, onBack,
+  name, stocks, settings, onBack,
 }: {
   name: string
   stocks: Asset[]
+  settings: Settings | undefined
   onBack: () => void
 }) {
   const val  = stocks.reduce((s, a) => s + a.currentValue, 0)
-  const cost = stocks.reduce((s, a) => s + (a.acquisitionPrice ?? 0) * (a.quantity ?? 0), 0)
+  const cost = stocks.reduce((s, a) => s + costKrw(a, settings), 0)
   const pnl  = val - cost
   const roi  = cost > 0 ? (pnl / cost) * 100 : 0
 
@@ -316,13 +335,24 @@ function AccountSummaryBanner({
 }
 
 /* ── 종목 타일 ── */
-function StockTile({ asset, onClick }: { asset: Asset; onClick: () => void }) {
-  const isSold = !!asset.disposalDate
-  const val    = isSold ? (asset.disposalPrice ?? 0) : asset.currentValue
-  const cost   = (asset.acquisitionPrice ?? 0) * (asset.quantity ?? 0)
-  const pnl    = val - cost
-  const roi    = cost > 0 ? (pnl / cost) * 100 : 0
-  const d      = asset.detail as StockDetail | undefined
+function StockTile({ asset, settings, onClick }: { asset: Asset; settings: Settings | undefined; onClick: () => void }) {
+  const isSold   = !!asset.disposalDate
+  const valKrw   = isSold ? (asset.disposalPrice ?? 0) : asset.currentValue
+  const d        = asset.detail as StockDetail | undefined
+  const currency = d?.currency ?? 'KRW'
+  const isFx     = currency !== 'KRW'
+  const rate     = getRate(settings, currency)
+  const avgPrice = asset.acquisitionPrice ?? 0
+  const qty      = asset.quantity ?? 0
+
+  // 외화: cost는 외화 기준, krw 환산으로 pnl 계산
+  const costFx  = avgPrice * qty                      // 외화 매입원가
+  const costKrw_ = costFx * rate                      // KRW 환산 매입원가
+  const cost    = isFx ? costKrw_ : costFx            // KRW 기준 cost
+  const pnlKrw  = valKrw - cost
+  const valFx   = isFx ? valKrw / rate : 0            // 외화 평가액
+  const pnlFx   = isFx ? valFx - costFx : 0          // 외화 손익
+  const roi     = cost > 0 ? (pnlKrw / cost) * 100 : 0
 
   return (
     <button
@@ -334,7 +364,7 @@ function StockTile({ asset, onClick }: { asset: Asset; onClick: () => void }) {
       {/* 상단: 손익 인디케이터 + 이름 */}
       <div className="flex items-start gap-3">
         <div className={`w-1 self-stretch rounded-full shrink-0 mt-0.5 ${
-          pnl > 0 ? 'bg-emerald-500' : pnl < 0 ? 'bg-red-500' : 'bg-gray-600'
+          pnlKrw > 0 ? 'bg-emerald-500' : pnlKrw < 0 ? 'bg-red-500' : 'bg-gray-600'
         }`} />
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-gray-100 truncate group-hover:text-blue-300 transition-colors">
@@ -358,34 +388,48 @@ function StockTile({ asset, onClick }: { asset: Asset; onClick: () => void }) {
 
       {/* 평가액 */}
       <div>
-        <p className="text-lg font-bold text-gray-100 tracking-tight">{formatManwon(val)}</p>
-        <p className="text-xs text-gray-500 mt-0.5">{(asset.quantity ?? 0).toLocaleString()}주 보유</p>
+        <p className="text-lg font-bold text-gray-100 tracking-tight">{formatManwon(valKrw)}</p>
+        {isFx && rate > 1 && (
+          <p className="text-xs text-blue-400 font-mono mt-0.5">{formatPrice(valFx, currency)}</p>
+        )}
+        <p className="text-xs text-gray-500 mt-0.5">{qty.toLocaleString()}주 보유</p>
       </div>
 
       <div className="border-t border-gray-700/60" />
 
-      {/* 하단 손익 */}
+      {/* 하단: 평단가 + 손익 */}
       <div className="flex items-end justify-between">
         <div>
-          <p className="text-xs text-gray-500 mb-0.5">투자원금</p>
-          <p className="text-xs text-gray-400">{formatManwon(cost)}</p>
+          <p className="text-xs text-gray-500 mb-0.5">평단가</p>
+          <p className="text-xs text-gray-400 font-mono">{formatAvgPrice(avgPrice, currency)}</p>
         </div>
         <div className="text-right">
           <div className="flex items-center justify-end gap-1 mb-0.5">
-            {pnl > 0
+            {pnlKrw > 0
               ? <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
-              : pnl < 0
+              : pnlKrw < 0
               ? <TrendingDown className="w-3.5 h-3.5 text-red-400" />
               : <Minus className="w-3.5 h-3.5 text-gray-500" />}
             <span className={`text-sm font-bold ${
-              pnl > 0 ? 'text-emerald-400' : pnl < 0 ? 'text-red-400' : 'text-gray-500'
+              pnlKrw > 0 ? 'text-emerald-400' : pnlKrw < 0 ? 'text-red-400' : 'text-gray-500'
             }`}>
               {roi >= 0 ? '+' : ''}{roi.toFixed(1)}%
             </span>
           </div>
-          <p className={`text-xs ${pnl > 0 ? 'text-emerald-400' : pnl < 0 ? 'text-red-400' : 'text-gray-500'}`}>
-            {pnl >= 0 ? '+' : ''}{formatManwon(pnl)}
-          </p>
+          {isFx && rate > 1 ? (
+            <>
+              <p className={`text-xs font-mono ${pnlKrw > 0 ? 'text-emerald-400' : pnlKrw < 0 ? 'text-red-400' : 'text-gray-500'}`}>
+                {pnlFx >= 0 ? '+' : ''}{formatPrice(pnlFx, currency)}
+              </p>
+              <p className={`text-xs ${pnlKrw > 0 ? 'text-emerald-400/70' : pnlKrw < 0 ? 'text-red-400/70' : 'text-gray-500'}`}>
+                {pnlKrw >= 0 ? '+' : ''}{formatManwon(pnlKrw)}
+              </p>
+            </>
+          ) : (
+            <p className={`text-xs ${pnlKrw > 0 ? 'text-emerald-400' : pnlKrw < 0 ? 'text-red-400' : 'text-gray-500'}`}>
+              {pnlKrw >= 0 ? '+' : ''}{formatManwon(pnlKrw)}
+            </p>
+          )}
         </div>
       </div>
     </button>

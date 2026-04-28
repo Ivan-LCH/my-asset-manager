@@ -1,16 +1,22 @@
 import { useState } from 'react'
-import { ChevronDown, ChevronUp, Trash2, Pencil } from 'lucide-react'
+import { ChevronDown, ChevronUp, Trash2, Pencil, Check, X } from 'lucide-react'
 import KpiCard from '@/components/common/KpiCard'
 import HistoryTable from './HistoryTable'
 import AssetForm from './AssetForm'
 import DividendSection from './DividendSection'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
-import { useDeleteAsset } from '@/hooks/useAssets'
-import { formatMoney, formatManwon, formatPnl, TYPE_LABELS } from '@/lib/utils'
-import type { Asset, RealEstateDetail, StockDetail, PensionDetail } from '@/types'
+import { useDeleteAsset, useUpdateAsset } from '@/hooks/useAssets'
+import { useSettings } from '@/hooks/useSettings'
+import { formatMoney, formatManwon, formatPnl, formatPrice, formatAvgPrice, TYPE_LABELS } from '@/lib/utils'
+import type { Asset, RealEstateDetail, Settings, StockDetail, PensionDetail } from '@/types'
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from 'recharts'
+
+function getRate(settings: Settings | undefined, currency?: string): number {
+  if (!currency || currency === 'KRW') return 1
+  return (settings?.[`exchangeRate_${currency}`] as number) ?? 1
+}
 
 interface Props {
   asset:     Asset
@@ -20,10 +26,14 @@ interface Props {
 type Tab = 'info' | 'dividend'
 
 export default function AssetDetail({ asset, chartData }: Props) {
-  const [showForm,   setShowForm]   = useState(false)
-  const [confirmDel, setConfirmDel] = useState(false)
-  const [tab,        setTab]        = useState<Tab>('info')
+  const [showForm,      setShowForm]      = useState(false)
+  const [confirmDel,    setConfirmDel]    = useState(false)
+  const [tab,           setTab]           = useState<Tab>('info')
+  const [editingAvg,    setEditingAvg]    = useState(false)
+  const [avgPriceInput, setAvgPriceInput] = useState('')
   const deleteMut = useDeleteAsset()
+  const updateMut = useUpdateAsset()
+  const { data: settings } = useSettings()
 
   const a     = asset
   const d     = a.detail as (RealEstateDetail & StockDetail & PensionDetail) | undefined
@@ -35,6 +45,7 @@ export default function AssetDetail({ asset, chartData }: Props) {
   let c1: 'default' | 'red' | 'blue' | 'green' = 'default'
   let c2: 'default' | 'red' | 'blue' | 'green' = 'default'
   let c3: 'default' | 'red' | 'blue' | 'green' = 'blue'
+  let pnlSub = ''   // 평가금액/손익 카드의 sub 문자열 (STOCK/PHYSICAL 전용)
 
   if (a.type === 'REAL_ESTATE') {
     const liab   = (d?.loanAmount ?? 0) + (d?.tenantDeposit ?? 0)
@@ -43,13 +54,29 @@ export default function AssetDetail({ asset, chartData }: Props) {
     k2 = '부채 총계';                          v2 = formatMoney(liab);     c2 = 'red'
     k3 = '순자산 (Equity)';                   v3 = formatMoney(equity);   c3 = 'blue'
   } else if (a.type === 'STOCK' || a.type === 'PHYSICAL') {
-    const invested = (a.acquisitionPrice ?? 0) * (a.quantity ?? 0)
-    const pnl      = displayVal - invested
-    const roi      = invested > 0 ? (pnl / invested) * 100 : 0
-    k1 = '평가 금액'; v1 = formatMoney(displayVal)
-    k2 = '평가 손익'; v2 = `${formatPnl(pnl)} (${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%)`
-    c2 = pnl >= 0 ? 'green' : 'red'
-    k3 = '보유 수량'; v3 = `${(a.quantity ?? 0).toLocaleString()}`; c3 = 'default'
+    // acquisitionPrice = 네이티브 통화 기준 (USD 주식 → USD, KRW → KRW)
+    const currency = (d as StockDetail | undefined)?.currency ?? 'KRW'
+    const isFx     = a.type === 'STOCK' && currency !== 'KRW'
+    const rate     = getRate(settings, currency)
+    const avgPrice = a.acquisitionPrice ?? 0
+    const qty      = a.quantity ?? 0
+    const costFx   = avgPrice * qty
+    const costKrw  = isFx ? costFx * rate : costFx
+    const pnlKrw   = displayVal - costKrw
+    const roi      = costKrw > 0 ? (pnlKrw / costKrw) * 100 : 0
+
+    k1 = '평가금액/손익'
+    v1 = formatMoney(displayVal)
+    c1 = pnlKrw >= 0 ? 'green' : 'red'
+    pnlSub = (isFx && rate > 1)
+      ? `${pnlKrw >= 0 ? '+' : ''}${formatPrice(displayVal / rate - costFx, currency)} / ${formatPnl(pnlKrw)} (${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%)`
+      : `${formatPnl(pnlKrw)} (${roi >= 0 ? '+' : ''}${roi.toFixed(1)}%)`
+
+    k2 = '평단가'
+    v2 = formatAvgPrice(avgPrice, currency)   // 네이티브 통화 표시
+    c2 = 'default'
+
+    k3 = '보유 수량'; v3 = `${qty.toLocaleString()}`; c3 = 'default'
   } else {
     k1 = '현재 가치';  v1 = formatMoney(displayVal)
     k2 = '취득가';     v2 = formatMoney(a.acquisitionPrice ?? 0)
@@ -101,14 +128,31 @@ export default function AssetDetail({ asset, chartData }: Props) {
           }
         />
         <InfoCell label="취득일" value={a.acquisitionDate ?? '-'} />
-        <InfoCell
-          label={(a.type === 'STOCK' || a.type === 'PHYSICAL') ? '투자원금' : '취득가'}
-          value={
-            (a.type === 'STOCK' || a.type === 'PHYSICAL')
-              ? formatMoney((a.acquisitionPrice ?? 0) * (a.quantity ?? 0))
-              : formatMoney(a.acquisitionPrice ?? 0)
-          }
-        />
+        {a.type === 'STOCK' ? (
+          <AvgPriceCell
+            asset={a}
+            currency={(d as StockDetail | undefined)?.currency ?? 'KRW'}
+            editing={editingAvg}
+            input={avgPriceInput}
+            onInputChange={setAvgPriceInput}
+            onEdit={() => { setAvgPriceInput(String(a.acquisitionPrice ?? 0)); setEditingAvg(true) }}
+            onSave={() => {
+              const v = parseFloat(avgPriceInput)
+              if (!isNaN(v) && v >= 0) updateMut.mutate({ id: a.id, data: { acquisitionPrice: v } })
+              setEditingAvg(false)
+            }}
+            onCancel={() => setEditingAvg(false)}
+          />
+        ) : (
+          <InfoCell
+            label={a.type === 'PHYSICAL' ? '투자원금' : '취득가'}
+            value={
+              a.type === 'PHYSICAL'
+                ? formatMoney((a.acquisitionPrice ?? 0) * (a.quantity ?? 0))
+                : formatMoney(a.acquisitionPrice ?? 0)
+            }
+          />
+        )}
         <InfoCell
           label="상태"
           value={isSold ? `매각 (${a.disposalDate})` : '보유중'}
@@ -148,7 +192,7 @@ export default function AssetDetail({ asset, chartData }: Props) {
 
       {/* KPI 카드 */}
       {(asset.type !== 'STOCK' || tab === 'info') && <div className="grid grid-cols-3 gap-3">
-        <KpiCard label={k1} value={v1} color={c1} />
+        <KpiCard label={k1} value={v1} sub={pnlSub || undefined} color={c1} />
         <KpiCard label={k2} value={v2} color={c2} />
         <KpiCard label={k3} value={v3} color={c3} />
       </div>}
@@ -239,6 +283,50 @@ function InfoCell({
     <div className="bg-gray-700/40 rounded-lg px-3 py-2.5">
       <p className="text-xs text-gray-500 mb-1">{label}</p>
       <p className={`text-sm font-medium truncate ${valueClass}`}>{value}</p>
+    </div>
+  )
+}
+
+function AvgPriceCell({ asset, currency, editing, input, onInputChange, onEdit, onSave, onCancel }: {
+  asset: Asset
+  currency: string
+  editing: boolean
+  input: string
+  onInputChange: (v: string) => void
+  onEdit: () => void
+  onSave: () => void
+  onCancel: () => void
+}) {
+  const isFx = currency !== 'KRW'
+  const avg  = asset.acquisitionPrice ?? 0
+  return (
+    <div className="bg-gray-700/40 rounded-lg px-3 py-2.5">
+      <p className="text-xs text-gray-500 mb-1">
+        평단가{isFx ? <span className="text-blue-400/80 ml-1">({currency})</span> : ''}
+      </p>
+      {editing ? (
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-gray-400 shrink-0">{isFx ? '$' : '₩'}</span>
+          <input
+            type="number"
+            step={isFx ? '0.01' : '1'}
+            placeholder={isFx ? '0.00' : '0'}
+            className="w-full bg-gray-600 text-gray-100 text-sm rounded px-2 py-0.5 outline-none focus:ring-1 focus:ring-blue-400"
+            value={input}
+            onChange={(e) => onInputChange(e.target.value)}
+            autoFocus
+          />
+          <button onClick={onSave}  className="text-emerald-400 hover:text-emerald-300"><Check className="w-3.5 h-3.5" /></button>
+          <button onClick={onCancel} className="text-gray-500 hover:text-gray-300"><X className="w-3.5 h-3.5" /></button>
+        </div>
+      ) : (
+        <button onClick={onEdit} className="flex items-center gap-1 group/avg">
+          <span className="text-sm font-medium text-gray-200 font-mono">
+            {formatAvgPrice(avg, currency)}
+          </span>
+          <Pencil className="w-3 h-3 text-gray-600 group-hover/avg:text-blue-400 transition-colors" />
+        </button>
+      )}
     </div>
   )
 }

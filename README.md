@@ -32,6 +32,14 @@
 - 계좌 선택 시 해당 계좌 종목별 성장 추이 차트로 자동 전환
 - 실시간 시세 업데이트 (yfinance, 장중/종가 지원)
 - 계좌별 합산 손익 / 수익률 표시
+- **평단가 관리 (해외주식 달러 지원)**
+  - 종목 타일·상세 모달에 평단가 표시
+  - 국내주식: 원화(₩), 해외주식(USD 등): 달러($) 기준으로 입력·표시
+  - 상세 모달에서 직접 수정 가능 (연필 아이콘 클릭 → 인라인 편집)
+  - 평단가 × 수량 × 환율로 KRW 환산 손익 계산
+  - 해외주식 손익: 외화 금액 + 원화 환산 동시 표시
+- **배당금 관리**: 종목별 배당 이력 입력, 연간/월간 배당 집계
+- **이력 관리 단가 표시**: 해외주식 단가는 `$376.30` 형식으로 표시
 
 #### 🏠 부동산
 - 순자산 기준 집계 (매매가 - 대출 - 전세보증금)
@@ -49,7 +57,7 @@
 - 모든 차트 항목을 최근 평가액 기준 내림차순 정렬
 - 커스텀 툴팁 (항목별 금액 + 합계)
 
-### 🌅 은퇴 계획 (신규)
+### 🌅 은퇴 계획
 은퇴 후 현금흐름을 연도별로 시뮬레이션하는 전용 페이지.
 
 **지출 설정**
@@ -79,6 +87,28 @@
 
 은퇴 연도 행은 파란색으로 하이라이트. 모든 설정값은 DB에 영구 저장.
 
+### ⚙️ 지역가입자 건강보험료 계산기
+- 은퇴 후 소득·재산 기반 건강보험료 자동 계산
+- 금융소득(이자·배당), 연금소득, 기타소득, 재산세 과표, 전세보증금 입력
+- 소득점수 + 재산점수 합산 → 보험료 산출
+
+---
+
+## 평단가 및 손익 계산 방식
+
+### 해외주식 (USD 등)
+- `acquisition_price`: 주식 네이티브 통화(USD) 기준으로 저장
+- `current_value`: yfinance 종가 × 수량 × 환율(KRW 환산)
+- 손익 계산: `pnl_krw = current_value - acquisition_price × quantity × rate`
+- 환율: 주가 업데이트 시 settings 테이블에 자동 저장 (`exchange_rate_USD` 등)
+
+### 국내주식 (KRW)
+- `acquisition_price`: 원화 기준
+- 손익 계산: `pnl = current_value - acquisition_price × quantity`
+
+### 평단가 수정
+상세 모달 → 정보 탭 → 평단가 셀 클릭 → 인라인 편집 → ✓ 저장
+
 ---
 
 ## 프로젝트 구조
@@ -90,6 +120,7 @@ backend/
 │   ├── history.py     # 이력 관리
 │   ├── stocks.py      # 주가 업데이트
 │   ├── settings.py    # 앱 설정
+│   ├── dividends.py   # 배당금 관리
 │   └── retirement.py  # 은퇴 계획 데이터 저장/조회
 ├── core/config.py
 ├── db/
@@ -103,21 +134,21 @@ backend/
 frontend/src/
 ├── components/
 │   ├── layout/        # Sidebar, Header, AppLayout
-│   ├── assets/        # AssetCreateForm, AssetModal 등
+│   ├── assets/        # AssetDetail, AssetForm, HistoryTable, DividendSection 등
 │   └── common/        # AssetChart, KpiCard, PeriodFilter 등
 ├── hooks/             # useAssets, useHistory, useSettings, useRetirement 등
 ├── pages/
 │   ├── Dashboard.tsx
-│   ├── StockPage.tsx
+│   ├── StockPage.tsx        # 계좌별 종목 관리 + 평단가 편집
 │   ├── PensionPage.tsx
 │   ├── RealEstatePage.tsx
-│   ├── AssetPage.tsx  # 예적금/실물/기타 공통
-│   ├── RetirementPage.tsx  # 은퇴 계획
+│   ├── AssetPage.tsx        # 예적금/실물/기타 공통
+│   ├── RetirementPage.tsx   # 은퇴 계획 + 건강보험료 계산기
 │   └── Settings.tsx
 ├── types/index.ts
 └── lib/
     ├── api.ts         # axios 클라이언트 + API 함수
-    └── utils.ts       # 포맷팅 유틸
+    └── utils.ts       # 포맷팅 유틸 (formatPrice, formatAvgPrice 등)
 ```
 
 ---
@@ -126,13 +157,16 @@ frontend/src/
 
 | 테이블 | 설명 |
 |--------|------|
-| `assets` | 자산 기본 정보 (UUID, type, name, current_value 등) |
+| `assets` | 자산 기본 정보 (UUID, type, name, current_value, acquisition_price 등) |
 | `real_estate_details` | 부동산 상세 (대출, 전세 등) |
-| `stock_details` | 주식 상세 (계좌명, 통화, ticker 등) |
+| `stock_details` | 주식 상세 (계좌명, 통화, ticker, 배당 정보 등) |
 | `pension_details` | 연금 상세 (수령기간, 월수령액, 증가율) |
 | `savings_details` | 예적금 상세 |
-| `asset_history` | 자산별 날짜-금액 이력 |
-| `settings` | 앱 설정 + 은퇴 계획 JSON (`retirement_plan` 키) |
+| `asset_history` | 자산별 날짜-금액 이력 (price는 네이티브 통화 기준) |
+| `settings` | 앱 설정 + 환율 캐시 + 은퇴 계획 JSON |
+
+> `stock_details.currency` = `KRW` / `USD` / `JPY`  
+> `assets.acquisition_price` = 해당 통화 기준 주당 평균단가
 
 ---
 
@@ -159,10 +193,12 @@ docker exec my-asset-manager tail -f /app/logs/server.log
 |--------|------|------|
 | GET | `/api/assets` | 자산 목록 (type 필터) |
 | POST | `/api/assets` | 자산 추가 |
-| PUT | `/api/assets/{id}` | 자산 수정 |
+| PUT | `/api/assets/{id}` | 자산 수정 (detail 키 없으면 상세 테이블 유지) |
 | DELETE | `/api/assets/{id}` | 자산 삭제 |
 | GET | `/api/assets/chart` | 차트 집계 (type, period, group_by, account 필터) |
 | GET/POST/PUT/DELETE | `/api/assets/{id}/history` | 이력 관리 |
-| POST | `/api/stocks/update` | 주가 일괄 업데이트 |
-| GET/PUT | `/api/settings` | 앱 설정 |
+| POST | `/api/stocks/update` | 주가 일괄 업데이트 + 환율 캐시 |
+| GET/PUT | `/api/settings` | 앱 설정 (환율 포함) |
 | GET/PUT | `/api/retirement` | 은퇴 계획 저장/조회 |
+| GET/POST/PUT/DELETE | `/api/assets/{id}/dividends` | 배당금 이력 관리 |
+| GET | `/api/dividends/summary` | 배당금 종목별 요약 |

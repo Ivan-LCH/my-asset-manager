@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { Trash2, Pencil, Plus } from 'lucide-react'
 import { useAddHistory, useUpdateHistory, useDeleteHistory } from '@/hooks/useHistory'
 import ConfirmDialog from '@/components/common/ConfirmDialog'
-import { formatMoney } from '@/lib/utils'
-import type { Asset, HistoryItem } from '@/types'
+import { formatMoney, formatPrice } from '@/lib/utils'
+import type { Asset, HistoryItem, StockDetail } from '@/types'
 
 interface Props { asset: Asset }
 
@@ -25,6 +25,7 @@ export default function HistoryTable({ asset }: Props) {
   const [fVal, setFVal]     = useState(0)
 
   const qtyBased = isQtyBased(asset.type)
+  const currency = (asset.detail as StockDetail | undefined)?.currency ?? 'KRW'
   const sorted   = [...asset.history].sort((a, b) => b.date.localeCompare(a.date))
 
   const openEdit = (h: HistoryItem) => {
@@ -173,8 +174,8 @@ export default function HistoryTable({ asset }: Props) {
                 <td className="px-3 py-2 text-gray-300">{h.date}</td>
                 {qtyBased && (
                   <>
-                    <td className="px-3 py-2 text-right text-gray-300">
-                      {h.price ? formatMoney(h.price) : '-'}
+                    <td className="px-3 py-2 text-right text-gray-300 font-mono">
+                      {h.price ? formatPrice(h.price, currency) : '-'}
                     </td>
                     <td className="px-3 py-2 text-right text-gray-300">
                       {h.quantity?.toLocaleString() ?? '-'}

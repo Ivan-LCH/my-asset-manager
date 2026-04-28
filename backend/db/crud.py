@@ -170,9 +170,11 @@ async def update_asset(db: AsyncSession, asset_id: str, data: dict):
     asset.quantity          = data.get("quantity", asset.quantity)
     asset.updated_at        = _now()
 
-    # 상세 테이블: 삭제 후 재삽입
-    await _delete_detail(db, asset_id, asset.type)
-    _add_detail(db, asset_id, data)
+    # 상세 테이블: detail 키가 있을 때만 재생성 (없으면 기존 유지)
+    if "detail" in data:
+        await _delete_detail(db, asset_id, asset.type)
+        await db.flush()   # Core DELETE를 먼저 반영 후 ORM INSERT
+        _add_detail(db, asset_id, data)
 
 
 async def delete_asset(db: AsyncSession, asset_id: str):

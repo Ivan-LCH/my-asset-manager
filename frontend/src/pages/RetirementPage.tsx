@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Plus, Trash2, RotateCcw, Save } from 'lucide-react'
+import { Plus, Trash2, RotateCcw, Save, ChevronDown } from 'lucide-react'
 import { useAssets } from '@/hooks/useAssets'
 import { useSettings } from '@/hooks/useSettings'
 import { useRetirement, useSaveRetirement } from '@/hooks/useRetirement'
@@ -161,11 +161,39 @@ function pnlColor(v: number) {
 }
 
 // ── 섹션 래퍼 ─────────────────────────────────────────────
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({ children }: { children: React.ReactNode }) {
+  return <div className="space-y-3">{children}</div>
+}
+
+// ── Expander ───────────────────────────────────────────────
+function Expander({
+  title, badge, children, defaultOpen = false,
+}: {
+  title: string
+  badge?: string
+  children: React.ReactNode
+  defaultOpen?: boolean
+}) {
+  const [open, setOpen] = useState(defaultOpen)
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-3">
-      <h3 className="text-sm font-semibold text-gray-300">{title}</h3>
-      {children}
+    <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-5 py-3.5 text-left hover:bg-gray-750 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-gray-200">{title}</span>
+          {badge && <span className="text-xs text-gray-500 bg-gray-700 px-2 py-0.5 rounded-full">{badge}</span>}
+        </div>
+        <ChevronDown
+          className={`w-4 h-4 text-gray-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div className="px-5 pb-5 pt-1 border-t border-gray-700 space-y-5">
+          {children}
+        </div>
+      )}
     </div>
   )
 }
@@ -205,6 +233,31 @@ function TextInput({
   )
 }
 
+// ── 정보 툴팁 ──────────────────────────────────────────────
+function InfoTooltip({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-flex items-center">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        className="w-4 h-4 rounded-full bg-gray-600 hover:bg-gray-500 text-gray-300 text-[10px] font-bold
+          flex items-center justify-center leading-none transition-colors shrink-0"
+      >
+        ?
+      </button>
+      {open && (
+        <span className="absolute left-6 top-1/2 -translate-y-1/2 z-50 w-64
+          bg-gray-900 border border-gray-600 rounded-xl px-3 py-2.5 shadow-2xl
+          text-[11px] text-gray-300 leading-relaxed whitespace-pre-line pointer-events-none">
+          {text}
+        </span>
+      )}
+    </span>
+  )
+}
+
 function YearInput({
   value, onChange,
 }: { value: number; onChange: (v: number) => void }) {
@@ -229,7 +282,8 @@ function ExpensesSection({
     onChange(items.map((i) => (i.id === id ? { ...i, [field]: val } : i)))
 
   return (
-    <Section title="💰 월 생활비">
+    <Section>
+      <p className="text-xs font-semibold text-gray-400">💰 월 생활비</p>
       <div className="space-y-1.5">
         {items.map((item) => (
           <div key={item.id} className="flex items-center gap-2">
@@ -295,7 +349,8 @@ function TravelSection({
     onChange(items.map((i) => (i.id === id ? { ...i, [field]: val } : i)))
 
   return (
-    <Section title="✈️ 여행비">
+    <Section>
+      <p className="text-xs font-semibold text-gray-400">✈️ 여행비</p>
       <div className="space-y-3">
         {items.map((item) => (
           <div key={item.id} className="bg-gray-750 border border-gray-700 rounded-lg p-3 space-y-2">
@@ -351,7 +406,8 @@ function LumpsumSection({
     onChange(items.map((i) => (i.id === id ? { ...i, [field]: val } : i)))
 
   return (
-    <Section title="💎 목돈 수입 (전세금·퇴직금 등)">
+    <Section>
+      <p className="text-xs font-semibold text-gray-400">💎 목돈 수입 (전세금·퇴직금 등)</p>
       <div className="space-y-2">
         {items.map((item) => (
           <div key={item.id} className="bg-gray-750 rounded-lg border border-gray-700 p-3 space-y-2">
@@ -409,7 +465,8 @@ function EmergencySection({
     onChange(items.map((i) => (i.id === id ? { ...i, [field]: val } : i)))
 
   return (
-    <Section title="🚨 긴급자금 (일회성 지출)">
+    <Section>
+      <p className="text-xs font-semibold text-gray-400">🚨 긴급자금 (일회성 지출)</p>
       <div className="space-y-1.5">
         {items.map((item) => (
           <div key={item.id} className="flex items-center gap-2">
@@ -455,7 +512,7 @@ function HealthInsuranceSection({
     onChange({ ...hi, [field]: val })
 
   return (
-    <Section title="🏥 건강보험료 계산 (지역가입자)">
+    <Section>
       <p className="text-[11px] text-gray-500 -mt-1">
         2025년 기준 · 점수당 {hi.scorePerPoint}원 · 결과는 예측값이며 실제와 차이가 있을 수 있습니다
       </p>
@@ -516,7 +573,12 @@ function HealthInsuranceSection({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 w-36 shrink-0">기타소득 (연)</span>
+            <span className="flex items-center gap-1 text-xs text-gray-400 w-36 shrink-0">
+              기타소득 (연)
+              <InfoTooltip text={
+                "사업소득, 근로소득, 기타소득 등\n연간 합계금액을 입력합니다.\n\n100% 반영됩니다."
+              } />
+            </span>
             <div className="flex-1">
               <AmountInput
                 value={hi.otherIncome}
@@ -532,7 +594,14 @@ function HealthInsuranceSection({
           <p className="text-xs font-medium text-gray-400">재산 · 자동차</p>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 w-36 shrink-0">재산세 과세표준</span>
+            <span className="flex items-center gap-1 text-xs text-gray-400 w-36 shrink-0">
+              재산세 과세표준
+              <InfoTooltip text={
+                "집값(실거래가)이 아닌 과세표준을 입력해야 합니다.\n\n" +
+                "과세표준 = 공시가격 × 공정시장가액비율(약 43%)\n공시가격 ≈ 실거래가의 60~70%\n\n" +
+                "확인 방법:\n• 위택스(wetax.go.kr) 재산세 고지서\n• 부동산공시가격알리미(realtyprice.kr)"
+              } />
+            </span>
             <div className="flex-1">
               <AmountInput
                 value={hi.propertyTaxBase}
@@ -543,7 +612,13 @@ function HealthInsuranceSection({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 w-36 shrink-0">임차보증금</span>
+            <span className="flex items-center gap-1 text-xs text-gray-400 w-36 shrink-0">
+              임차보증금
+              <InfoTooltip text={
+                "전세·월세 보증금을 입력합니다.\n\n" +
+                "보증금의 30%만 재산점수에 반영됩니다.\n(예: 보증금 1억 → 3천만원으로 계산)"
+              } />
+            </span>
             <div className="flex-1">
               <AmountInput
                 value={hi.rentalDeposit}
@@ -554,7 +629,13 @@ function HealthInsuranceSection({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 w-36 shrink-0">차량가액</span>
+            <span className="flex items-center gap-1 text-xs text-gray-400 w-36 shrink-0">
+              차량가액
+              <InfoTooltip text={
+                "차량의 현재 시가를 입력합니다.\n\n" +
+                "4천만원 미만이면 보험료에 반영되지 않습니다.\n4천만~6천만: 점수 45\n6천만~8천만: 점수 62\n8천만 이상: 점수 80"
+              } />
+            </span>
             <div className="flex-1">
               <AmountInput
                 value={hi.carValue}
@@ -565,7 +646,13 @@ function HealthInsuranceSection({
           </div>
 
           <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 w-36 shrink-0">점수당 금액 (원)</span>
+            <span className="flex items-center gap-1 text-xs text-gray-400 w-36 shrink-0">
+              점수당 금액
+              <InfoTooltip text={
+                "재산·자동차 점수 1점당 보험료(원)입니다.\n\n" +
+                "기본값: 208.4원 (2025년 기준)\n매년 건강보험공단에서 고시하며 변동될 수 있습니다."
+              } />
+            </span>
             <input
               type="number"
               step="0.1"
@@ -802,41 +889,56 @@ export default function RetirementPage() {
         </div>
       </div>
 
-      {/* 설정 패널 */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <ExpensesSection items={plan.expenses} onChange={(v) => update('expenses', v)} />
-
-        <div className="space-y-4">
-          <TravelSection items={plan.travel} onChange={(v) => update('travel', v)} />
-
-          <Section title="🏥 의료비 적립">
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-gray-400">월 적립액</span>
-              <div className="w-40">
-                <AmountInput
-                  value={plan.medicalMonthly}
-                  onChange={(v) => update('medicalMonthly', v)}
-                />
+      {/* Expander 1: 생활비 / 여행 / 의료비 */}
+      <Expander
+        title="💰 생활비 / 여행 / 의료비 적립"
+        badge={`월 ${formatManwon(plan.expenses.reduce((s, e) => s + e.amount, 0) + plan.travel.reduce((s, t) => s + (t.phase1Times * t.costPerTrip) / 12, 0) + plan.medicalMonthly)}`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <ExpensesSection items={plan.expenses} onChange={(v) => update('expenses', v)} />
+          <div className="space-y-5">
+            <TravelSection items={plan.travel} onChange={(v) => update('travel', v)} />
+            <div className="border-t border-gray-700 pt-4">
+              <p className="text-xs font-semibold text-gray-400 mb-3">🏥 의료비 적립</p>
+              <div className="flex items-center gap-3">
+                <span className="text-sm text-gray-400">월 적립액</span>
+                <div className="w-40">
+                  <AmountInput
+                    value={plan.medicalMonthly}
+                    onChange={(v) => update('medicalMonthly', v)}
+                  />
+                </div>
+                <span className="text-xs text-gray-500">/월</span>
               </div>
-              <span className="text-xs text-gray-500">/월</span>
             </div>
-          </Section>
+          </div>
         </div>
-      </div>
+      </Expander>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <LumpsumSection  items={plan.lumpsum}   onChange={(v) => update('lumpsum', v)} />
-        <EmergencySection items={plan.emergency} onChange={(v) => update('emergency', v)} />
-      </div>
+      {/* Expander 2: 목돈 수입 / 긴급자금 */}
+      <Expander
+        title="💎 목돈 수입 / 긴급자금"
+        badge={`${plan.lumpsum.length + plan.emergency.length}건`}
+      >
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <LumpsumSection  items={plan.lumpsum}   onChange={(v) => update('lumpsum', v)} />
+          <EmergencySection items={plan.emergency} onChange={(v) => update('emergency', v)} />
+        </div>
+      </Expander>
 
-      {/* 건강보험료 계산기 */}
-      <HealthInsuranceSection
-        hi={plan.healthInsurance}
-        onChange={(v) => update('healthInsurance', v)}
-        result={hiResult}
-        pensionAutoMonthly={retirementPensionMonthly}
-        dividendAutoMonthly={dividendMonthly}
-      />
+      {/* Expander 3: 건강보험료 */}
+      <Expander
+        title="🏥 건강보험료 계산 (지역가입자)"
+        badge={`월 ${formatManwon(healthInsuranceMonthly)}`}
+      >
+        <HealthInsuranceSection
+          hi={plan.healthInsurance}
+          onChange={(v) => update('healthInsurance', v)}
+          result={hiResult}
+          pensionAutoMonthly={retirementPensionMonthly}
+          dividendAutoMonthly={dividendMonthly}
+        />
+      </Expander>
 
       {/* 연도별 현금흐름 테이블 */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">

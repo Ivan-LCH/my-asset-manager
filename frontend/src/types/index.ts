@@ -62,6 +62,7 @@ export interface PensionDetail {
   expectedEndYear:        number
   expectedMonthlyPayout:  number
   annualGrowthRate:       number
+  hideInChart?:           boolean
 }
 
 export interface SavingsDetail {

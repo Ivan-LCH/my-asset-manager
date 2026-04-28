@@ -31,18 +31,20 @@ async def init_db():
     from backend.db import models  # noqa: F401
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        # 기존 stock_details에 배당 컬럼 추가 (이미 있으면 무시)
+        t = __import__("sqlalchemy", fromlist=["text"]).text
+        # stock_details 배당 컬럼
         for col, defval in [
             ("dividend_yield", "0"),
             ("dividend_dps",   "0"),
             ("dividend_cycle", "'연간'"),
         ]:
             try:
-                await conn.execute(
-                    __import__("sqlalchemy", fromlist=["text"]).text(
-                        f"ALTER TABLE stock_details ADD COLUMN {col} REAL DEFAULT {defval}"
-                    )
-                )
+                await conn.execute(t(f"ALTER TABLE stock_details ADD COLUMN {col} REAL DEFAULT {defval}"))
             except Exception:
-                pass  # 이미 존재하는 컬럼
+                pass
+        # pension_details hide_in_chart 컬럼
+        try:
+            await conn.execute(t("ALTER TABLE pension_details ADD COLUMN hide_in_chart INTEGER DEFAULT 0"))
+        except Exception:
+            pass
     print(f"✅ DB initialized: {DB_URL}")

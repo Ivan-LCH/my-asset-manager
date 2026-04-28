@@ -78,6 +78,7 @@ def _detail_to_dict(asset: Asset) -> Optional[dict]:
             "expected_end_year":       p.expected_end_year,
             "expected_monthly_payout": p.expected_monthly_payout,
             "annual_growth_rate":      p.annual_growth_rate,
+            "hide_in_chart":           bool(p.hide_in_chart),
         }
     if asset.type == "SAVINGS" and asset.savings:
         sv = asset.savings
@@ -213,6 +214,7 @@ def _add_detail(db: AsyncSession, asset_id: str, data: dict):
             expected_end_year       = detail.get("expected_end_year"),
             expected_monthly_payout = detail.get("expected_monthly_payout", 0),
             annual_growth_rate      = detail.get("annual_growth_rate", 0),
+            hide_in_chart           = 1 if detail.get("hide_in_chart") else 0,
         ))
     elif a_type == "SAVINGS":
         db.add(SavingsDetail(
@@ -384,7 +386,9 @@ def generate_chart_data(
 
     all_records = []
     for asset in assets:
-        # 매각 자산도 포함 (매각일 이후 0으로 처리됨)
+        # hide_in_chart 플래그가 설정된 연금 자산은 차트 제외 (주식으로 이미 집계됨)
+        if (asset.get("detail") or {}).get("hide_in_chart"):
+            continue
         records = _asset_to_records(asset)
         all_records.extend(records)
 
@@ -395,10 +399,13 @@ def generate_chart_data(
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date").drop_duplicates(subset=["asset_id", "date"], keep="last")
 
-    # 피벗 → 날짜 범위 reindex → forward fill
-    df_pivot = df.pivot(index="date", columns="asset_id", values="value")
-    full_idx  = pd.date_range(start=start, end=today, freq="D")
-    df_pivot  = df_pivot.reindex(full_idx).ffill().fillna(0)
+    # 피벗 → 전체 이력 범위로 ffill 후 period start 이후 슬라이싱
+    # (start 이전에만 이력이 있는 자산도 forward fill이 올바르게 동작하도록)
+    df_pivot  = df.pivot(index="date", columns="asset_id", values="value")
+    hist_min  = df["date"].min()
+    full_range = pd.date_range(start=min(hist_min, start), end=today, freq="D")
+    df_pivot  = df_pivot.reindex(full_range).ffill().fillna(0)
+    df_pivot  = df_pivot.loc[start:]
 
     # 언피벗
     df_melt = (

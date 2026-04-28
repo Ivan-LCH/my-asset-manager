@@ -42,6 +42,7 @@ export default function AssetForm({ asset, onClose }: Props) {
   const [expectedEndYear,        setExpectedEndYear]        = useState((d?.expectedEndYear        as number) ?? 0)
   const [expectedMonthlyPayout,  setExpectedMonthlyPayout]  = useState((d?.expectedMonthlyPayout  as number) ?? 0)
   const [annualGrowthRate,       setAnnualGrowthRate]       = useState((d?.annualGrowthRate       as number) ?? 0)
+  const [hideInChart,            setHideInChart]            = useState((d?.hideInChart            as boolean) ?? false)
 
   // 예적금
   const [isPensionLikeSav, setIsPensionLikeSav] = useState((d?.isPensionLike  as boolean) ?? false)
@@ -55,7 +56,7 @@ export default function AssetForm({ asset, onClose }: Props) {
       isPensionLike,
       ...(isPensionLike ? { pensionStartYear: pensionStartYearStock, pensionMonthly: pensionMonthlyStock } : {}),
     }
-    if (type === 'PENSION') return { pensionType: pensionType || undefined, expectedStartYear, expectedEndYear, expectedMonthlyPayout, annualGrowthRate }
+    if (type === 'PENSION') return { pensionType: pensionType || undefined, expectedStartYear, expectedEndYear, expectedMonthlyPayout, annualGrowthRate, hideInChart }
     if (type === 'SAVINGS') return {
       isPensionLike: isPensionLikeSav,
       ...(isPensionLikeSav ? { pensionStartYear: pensionStartYearSav, pensionMonthly: pensionMonthlySav } : {}),
@@ -214,6 +215,10 @@ export default function AssetForm({ asset, onClose }: Props) {
               <input type="number" step="0.1" className={inputCls} value={annualGrowthRate} onChange={(e) => setAnnualGrowthRate(+e.target.value)} />
             </div>
           </div>
+          <label className={checkCls}>
+            <input type="checkbox" checked={hideInChart} onChange={(e) => setHideInChart(e.target.checked)} className="accent-yellow-500" />
+            대시보드 차트 제외 (주식으로 이미 집계됨)
+          </label>
         </div>
       )}
 

@@ -6,7 +6,7 @@ import {
 import { useChart } from '@/hooks/useAssets'
 import PeriodFilter, { Period } from './PeriodFilter'
 import type { AssetType, ChartDataPoint } from '@/types'
-import { TYPE_COLORS, formatManwon } from '@/lib/utils'
+import { TYPE_COLORS } from '@/lib/utils'
 
 interface CustomTooltipProps {
   active?:  boolean
@@ -30,20 +30,20 @@ function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
               <span className="w-2 h-2 rounded-full shrink-0" style={{ background: p.color }} />
               <span className="text-xs text-gray-400 truncate">{p.name}</span>
             </div>
-            <span className="text-xs font-semibold text-gray-100 shrink-0">{formatManwon(p.value)}</span>
+            <span className="text-xs font-semibold text-gray-100 shrink-0">{`${Math.round(p.value / 1000000).toLocaleString('ko-KR')}백만`}</span>
           </div>
         ))}
       </div>
       {hasMultiple && (
         <div className="mt-2 pt-2 border-t border-gray-700 flex items-center justify-between">
           <span className="text-xs text-gray-400 font-medium">합계</span>
-          <span className="text-sm font-bold text-blue-400">{formatManwon(total)}</span>
+          <span className="text-sm font-bold text-blue-400">{`${Math.round(total / 1000000).toLocaleString('ko-KR')}백만`}</span>
         </div>
       )}
       {!hasMultiple && (
         <div className="mt-1.5 pt-1.5 border-t border-gray-700 flex items-center justify-between">
           <span className="text-xs text-gray-500">합계</span>
-          <span className="text-sm font-bold text-blue-400">{formatManwon(total)}</span>
+          <span className="text-sm font-bold text-blue-400">{`${Math.round(total / 1000000).toLocaleString('ko-KR')}백만`}</span>
         </div>
       )}
     </div>
@@ -150,7 +150,7 @@ export default function AssetChart({
             tick={{ fill: '#6b7280', fontSize: 11 }}
             tickLine={false}
             axisLine={false}
-            tickFormatter={(v: number) => `${Math.round(v / 1000).toLocaleString()}천`}
+            tickFormatter={(v: number) => `${Math.round(v / 1000000).toLocaleString()}백만`}
             width={60}
           />
           <Tooltip content={<CustomTooltip />} />

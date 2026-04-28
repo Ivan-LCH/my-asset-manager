@@ -79,6 +79,7 @@ class PensionDetail(Base):
     expected_end_year       = Column(Integer)
     expected_monthly_payout = Column(Float,   default=0) # 예상 월 수령액 (KRW)
     annual_growth_rate      = Column(Float,   default=0) # 연 증가율 (%)
+    hide_in_chart           = Column(Integer, default=0) # 1=대시보드 차트 제외 (주식으로 이미 집계 시)
 
     asset = relationship("Asset", back_populates="pension")
 

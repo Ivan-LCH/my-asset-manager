@@ -122,12 +122,16 @@ async def update_all_stocks(db: AsyncSession) -> dict:
     _RATE_CACHE.clear()  # 실행마다 환율 캐시 초기화
 
     # 1. Ticker 있는 주식 자산 조회
+    #   - 매각 완료(disposal_date 있음) 자산은 제외
+    #   - 보유 수량 0인 자산도 제외 (재매입 전까지 시세 갱신 불필요)
     q = (
         select(Asset, StockDetail)
         .join(StockDetail, Asset.id == StockDetail.asset_id)
         .where(Asset.type == "STOCK")
         .where(StockDetail.ticker.isnot(None))
         .where(StockDetail.ticker != "")
+        .where(Asset.disposal_date.is_(None))
+        .where(Asset.quantity > 0)
     )
     result = await db.execute(q)
     rows = result.all()
@@ -163,6 +167,9 @@ async def update_all_stocks(db: AsyncSession) -> dict:
                 last     = last_res.scalar_one_or_none()
                 if last:
                     start_candidates.append(datetime.strptime(last.date, "%Y-%m-%d"))
+                elif asset.acquisition_date:
+                    # 이력이 없으면 취득일부터. (30일 전부터 무조건 채우면 보유 전 기간에도 평가액이 생김)
+                    start_candidates.append(datetime.strptime(asset.acquisition_date[:10], "%Y-%m-%d"))
                 else:
                     start_candidates.append(datetime.now() - timedelta(days=30))
 
@@ -204,63 +211,62 @@ async def update_all_stocks(db: AsyncSession) -> dict:
             for asset, detail in asset_list:
                 currency = detail.currency or "KRW"
                 rate     = get_exchange_rate(currency)
-                qty      = asset.quantity or 0
+
+                # 기존 이력 로드. stock_updater는 가격만 갱신하고 수량은 이력값을 보존한다.
+                # (asset.quantity로 모든 이력 수량을 덮어쓰면 매수/매도 시점 이전 보유량까지 변경됨)
+                hist_q   = select(AssetHistory).where(
+                    AssetHistory.asset_id == asset.id
+                ).order_by(AssetHistory.date)
+                hist_res      = await db.execute(hist_q)
+                existing_list = hist_res.scalars().all()
+                existing_map  = {h.date: h for h in existing_list}
+
+                # 새로 추가되는 날짜에 적용할 직전 보유 수량 (마지막 이력 수량, 없으면 asset.quantity)
+                last_qty = (existing_list[-1].quantity if existing_list else asset.quantity) or 0
 
                 # (a) 확정 종가 이력 upsert (hist_df)
                 for date_idx, row in hist_df.iterrows():
                     date_str = date_idx.strftime("%Y-%m-%d")
                     price    = float(row["Close"])
-                    value    = price * qty * rate
 
-                    existing_q   = select(AssetHistory).where(
-                        AssetHistory.asset_id == asset.id,
-                        AssetHistory.date     == date_str,
-                    )
-                    existing_res = await db.execute(existing_q)
-                    existing     = existing_res.scalar_one_or_none()
-
+                    existing = existing_map.get(date_str)
                     if existing:
-                        existing.price    = price
-                        existing.quantity = qty
-                        existing.value    = value
+                        # 기존 수량 유지, 가격·평가액만 갱신
+                        ex_qty = existing.quantity or 0
+                        existing.price = price
+                        existing.value = price * ex_qty * rate
                     else:
                         db.add(AssetHistory(
                             asset_id = asset.id,
                             date     = date_str,
                             price    = price,
-                            quantity = qty,
-                            value    = value,
+                            quantity = last_qty,
+                            value    = price * last_qty * rate,
                         ))
 
                 # (b) 장중: 오늘 날짜 실시간 현재가 upsert (장 마감 후 재업데이트 시 종가로 덮어써짐)
                 if realtime_price is not None:
-                    rt_value     = realtime_price * qty * rate
-                    existing_q   = select(AssetHistory).where(
-                        AssetHistory.asset_id == asset.id,
-                        AssetHistory.date     == today_str,
-                    )
-                    existing_res = await db.execute(existing_q)
-                    existing     = existing_res.scalar_one_or_none()
-
+                    existing  = existing_map.get(today_str)
+                    rt_qty    = (existing.quantity if existing else last_qty) or 0
+                    rt_value  = realtime_price * rt_qty * rate
                     if existing:
-                        existing.price    = realtime_price
-                        existing.quantity = qty
-                        existing.value    = rt_value
+                        existing.price = realtime_price
+                        existing.value = rt_value
                     else:
                         db.add(AssetHistory(
                             asset_id = asset.id,
                             date     = today_str,
                             price    = realtime_price,
-                            quantity = qty,
+                            quantity = rt_qty,
                             value    = rt_value,
                         ))
 
-                # 6. current_value 동기화: 실시간가 우선, 없으면 hist_df 최신 종가
+                # 6. current_value 동기화: 실시간가 우선, 없으면 hist_df 최신 종가 (최신 보유 수량 기준)
                 final_price = realtime_price if realtime_price else (
                     float(hist_df["Close"].iloc[-1]) if not hist_df.empty else None
                 )
                 if final_price:
-                    asset.current_value = final_price * qty * rate
+                    asset.current_value = final_price * last_qty * rate
                     asset.updated_at    = datetime.now().isoformat()
 
                 updated_count += 1

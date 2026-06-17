@@ -19,7 +19,7 @@ TYPE_LABELS = {
     "REAL_ESTATE": "🏠 부동산",
     "STOCK":       "📈 주식",
     "PENSION":     "🛡️ 연금",
-    "SAVINGS":     "💰 예적금/현금",
+    "SAVINGS":     "💰 예적금",
     "PHYSICAL":    "💎 실물자산",
     "ETC":         "🎸 기타",
 }
@@ -29,11 +29,18 @@ def _now() -> str:
 
 def _asset_to_dict(asset: Asset) -> dict:
     """Asset ORM → dict (이력 + 상세 포함)"""
+    sorted_history = sorted(asset.history, key=lambda x: x.date)
+    # 직전 이력 시점(전일 등락 계산용): 평가액 + 단가
+    previous_value = sorted_history[-2].value if len(sorted_history) >= 2 else None
+    previous_price = sorted_history[-2].price if len(sorted_history) >= 2 else None
+
     d = {
         "id":                asset.id,
         "type":              asset.type,
         "name":              asset.name,
         "current_value":     asset.current_value,
+        "previous_value":    previous_value,
+        "previous_price":    previous_price,
         "acquisition_date":  asset.acquisition_date,
         "acquisition_price": asset.acquisition_price,
         "disposal_date":     asset.disposal_date,
@@ -43,7 +50,7 @@ def _asset_to_dict(asset: Asset) -> dict:
         "updated_at":        asset.updated_at,
         "history": [
             {"date": h.date, "value": h.value, "price": h.price, "quantity": h.quantity}
-            for h in sorted(asset.history, key=lambda x: x.date)
+            for h in sorted_history
         ],
         "detail": _detail_to_dict(asset),
     }
@@ -333,8 +340,8 @@ async def _sync_asset_value(db: AsyncSession, asset_id: str):
     asset_result = await db.execute(asset_q)
     asset = asset_result.scalar_one_or_none()
     if asset:
-        asset.current_value = latest.value or 0
-        asset.quantity      = latest.quantity or asset.quantity
+        asset.current_value = latest.value if latest.value is not None else 0
+        asset.quantity      = latest.quantity if latest.quantity is not None else asset.quantity
         asset.updated_at    = _now()
 
 
@@ -470,10 +477,9 @@ def _asset_to_records(asset: dict) -> list[dict]:
     disp_date  = asset.get("disposal_date")
     disp_price = asset.get("disposal_price") or 0
     if disp_date:
-        records.append({"asset_id": a_id, "date": disp_date[:10], "value": float(disp_price)})
-        # (4) 매각 이후 0
-        after = (datetime.strptime(disp_date[:10], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        records.append({"asset_id": a_id, "date": after, "value": 0.0})
+        # 매각 시점에 즉시 0 처리. 매각가-평가액 차이(매각손익)는 손익 KPI로 별도 표현.
+        # 매각 다음날 0 처리하면 매도/매수 자금이동 시 일별 증감 차트에 인위적 -변동이 발생함.
+        records.append({"asset_id": a_id, "date": disp_date[:10], "value": 0.0})
     else:
         cur_val = asset.get("current_value") or 0
         records.append({

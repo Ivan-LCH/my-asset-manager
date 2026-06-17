@@ -53,8 +53,15 @@ export default function StockPage() {
     if (!accountMap.has(acct)) accountMap.set(acct, [])
     accountMap.get(acct)!.push(a)
   }
+  // 계좌 내 종목: 평가액 내림차순
+  for (const stocks of accountMap.values()) {
+    stocks.sort((a, b) => b.currentValue - a.currentValue)
+  }
 
+  // 계좌 목록: 평가액 합계 내림차순
+  const accountTotal = (stocks: Asset[]) => stocks.reduce((s, a) => s + a.currentValue, 0)
   const accountEntries = Array.from(accountMap.entries())
+    .sort(([, a], [, b]) => accountTotal(b) - accountTotal(a))
   const currentStocks  = activeAccount ? (accountMap.get(activeAccount) ?? []) : []
 
   if (isLoading) return <div className="flex items-center justify-center h-64 text-gray-400">로딩 중...</div>
@@ -197,7 +204,13 @@ export default function StockPage() {
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {currentStocks.map((a) => (
-                <StockTile key={a.id} asset={a} settings={settings} onClick={() => setModalId(a.id)} />
+                <StockTile
+                  key={a.id}
+                  asset={a}
+                  settings={settings}
+                  accountTotal={currentStocks.reduce((s, x) => s + x.currentValue, 0)}
+                  onClick={() => setModalId(a.id)}
+                />
               ))}
             </div>
           </section>
@@ -335,7 +348,12 @@ function AccountSummaryBanner({
 }
 
 /* ── 종목 타일 ── */
-function StockTile({ asset, settings, onClick }: { asset: Asset; settings: Settings | undefined; onClick: () => void }) {
+function StockTile({ asset, settings, accountTotal, onClick }: {
+  asset: Asset
+  settings: Settings | undefined
+  accountTotal?: number
+  onClick: () => void
+}) {
   const isSold   = !!asset.disposalDate
   const valKrw   = isSold ? (asset.disposalPrice ?? 0) : asset.currentValue
   const d        = asset.detail as StockDetail | undefined
@@ -353,6 +371,19 @@ function StockTile({ asset, settings, onClick }: { asset: Asset; settings: Setti
   const valFx   = isFx ? valKrw / rate : 0            // 외화 평가액
   const pnlFx   = isFx ? valFx - costFx : 0          // 외화 손익
   const roi     = cost > 0 ? (pnlKrw / cost) * 100 : 0
+  // 현재가(주당) — 외화는 KRW 평가액을 환율·수량으로 역산해 네이티브 통화 표기
+  const currentPrice = qty > 0 ? (isFx ? valKrw / qty / rate : valKrw / qty) : 0
+
+  // 일간 등락 (전일 단가 대비) — 매각 종목은 미표시. 수량 변동 영향 제거 위해 단가 기준
+  const prevPrice    = asset.previousPrice
+  const hasDaily     = !isSold && prevPrice != null && prevPrice > 0 && currentPrice > 0
+  const priceChange  = hasDaily ? currentPrice - (prevPrice as number) : 0
+  const priceChangePct = hasDaily ? (priceChange / (prevPrice as number)) * 100 : 0
+
+  // 계좌 내 비중
+  const weight = !isSold && accountTotal && accountTotal > 0
+    ? (valKrw / accountTotal) * 100
+    : null
 
   return (
     <button
@@ -361,15 +392,22 @@ function StockTile({ asset, settings, onClick }: { asset: Asset; settings: Setti
         hover:border-blue-500/60 hover:shadow-lg hover:shadow-blue-500/5
         transition-all duration-200 p-4 space-y-3 group"
     >
-      {/* 상단: 손익 인디케이터 + 이름 */}
+      {/* 상단: 손익 인디케이터 + 이름 + 비중 */}
       <div className="flex items-start gap-3">
         <div className={`w-1 self-stretch rounded-full shrink-0 mt-0.5 ${
           pnlKrw > 0 ? 'bg-emerald-500' : pnlKrw < 0 ? 'bg-red-500' : 'bg-gray-600'
         }`} />
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-bold text-gray-100 truncate group-hover:text-blue-300 transition-colors">
-            {asset.name}
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-sm font-bold text-gray-100 truncate group-hover:text-blue-300 transition-colors">
+              {asset.name}
+            </p>
+            {weight != null && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-700 text-gray-300 font-medium shrink-0">
+                {weight.toFixed(1)}%
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2 mt-0.5">
             {d?.ticker && (
               <span className="text-xs text-gray-500 font-mono">{d.ticker}</span>
@@ -397,11 +435,26 @@ function StockTile({ asset, settings, onClick }: { asset: Asset; settings: Setti
 
       <div className="border-t border-gray-700/60" />
 
-      {/* 하단: 평단가 + 손익 */}
+      {/* 하단: 현재가/평단가 + 손익 */}
       <div className="flex items-end justify-between">
-        <div>
-          <p className="text-xs text-gray-500 mb-0.5">평단가</p>
-          <p className="text-xs text-gray-400 font-mono">{formatAvgPrice(avgPrice, currency)}</p>
+        <div className="space-y-0.5">
+          {!isSold && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-gray-500 w-10">현재가</span>
+              <span className="text-xs text-gray-200 font-mono">{formatAvgPrice(currentPrice, currency)}</span>
+              {hasDaily && (
+                <span className={`text-[10px] font-medium ${
+                  priceChange > 0 ? 'text-emerald-400' : priceChange < 0 ? 'text-red-400' : 'text-gray-500'
+                }`}>
+                  (오늘 {priceChange >= 0 ? '+' : ''}{formatPrice(priceChange, currency)} {priceChangePct >= 0 ? '+' : ''}{priceChangePct.toFixed(2)}%)
+                </span>
+              )}
+            </div>
+          )}
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-gray-500 w-10">평단가</span>
+            <span className="text-xs text-gray-400 font-mono">{formatAvgPrice(avgPrice, currency)}</span>
+          </div>
         </div>
         <div className="text-right">
           <div className="flex items-center justify-end gap-1 mb-0.5">

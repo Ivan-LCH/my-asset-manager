@@ -72,7 +72,9 @@ export default function Dashboard() {
                   ))}
                 </Pie>
                 <Tooltip
-                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8 }}
+                  contentStyle={{ background: '#1f2937', border: '1px solid #374151', borderRadius: 8, color: '#f3f4f6' }}
+                  itemStyle={{ color: '#e5e7eb' }}
+                  labelStyle={{ color: '#9ca3af' }}
                   formatter={(v: number) => formatManwon(v)}
                 />
               </PieChart>

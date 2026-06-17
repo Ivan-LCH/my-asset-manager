@@ -7,7 +7,7 @@ services:
     container_name: my-asset-manager
     ports:
       - "8090:8090"   # 웹 서비스
-      - "1040:22"     # SSH 접속 (유지보수용)
+      - "1040:22"     # SSH 접속 (유지보수용) - vpnkit 이슈로 임시 비활성화
     env_file:
       - .env
     volumes:

@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useCreateAsset } from '@/hooks/useAssets'
+import { useMemo, useState } from 'react'
+import { useAssets, useCreateAsset } from '@/hooks/useAssets'
 import type { AssetType, Currency } from '@/types'
 import { TYPE_LABELS, ASSET_TYPES } from '@/lib/utils'
 
@@ -12,6 +12,26 @@ const CURRENCIES: Currency[] = ['KRW', 'USD', 'JPY']
 
 export default function AssetCreateForm({ defaultType, onClose }: Props) {
   const createMut = useCreateAsset()
+  const { data: allAssets } = useAssets()
+
+  // 기존 주식 자산 — 계좌 목록 / 종목 정보 자동완성에 사용
+  const existingStocks = useMemo(
+    () => allAssets?.filter((a) => a.type === 'STOCK') ?? [],
+    [allAssets],
+  )
+  const existingAccounts = useMemo(() => {
+    const set = new Set<string>()
+    existingStocks.forEach((s) => {
+      const acc = (s.detail as Record<string, unknown> | undefined)?.accountName as string | undefined
+      if (acc && acc.trim()) set.add(acc.trim())
+    })
+    return Array.from(set)
+  }, [existingStocks])
+
+  // 계좌명 입력 모드: 기존 계좌 선택(select) 또는 새 계좌 직접 입력(input)
+  const [accountMode, setAccountMode] = useState<'select' | 'new'>(
+    existingAccounts.length > 0 ? 'select' : 'new',
+  )
 
   const [type,             setType]             = useState<AssetType>(defaultType ?? 'STOCK')
   const [name,             setName]             = useState('')
@@ -45,6 +65,18 @@ export default function AssetCreateForm({ defaultType, onClose }: Props) {
   const [isPensionLikeSav,    setIsPensionLikeSav]    = useState(false)
   const [pensionStartYearSav, setPensionStartYearSav] = useState(0)
   const [pensionMonthlySav,   setPensionMonthlySav]   = useState(0)
+
+  // 자산명 입력 — 동일한 이름의 기존 주식이 있으면 ticker/통화 자동 채움
+  const handleNameChange = (val: string) => {
+    setName(val)
+    if (type !== 'STOCK') return
+    const match = existingStocks.find((s) => s.name.trim() === val.trim())
+    if (match) {
+      const det = match.detail as Record<string, unknown> | undefined
+      if (det?.ticker) setTicker(det.ticker as string)
+      if (det?.currency) setCurrency(det.currency as Currency)
+    }
+  }
 
   const buildDetail = () => {
     if (type === 'REAL_ESTATE') return { address, loanAmount, tenantDeposit, isOwned, hasTenant }
@@ -110,7 +142,7 @@ export default function AssetCreateForm({ defaultType, onClose }: Props) {
           <input
             className={inputCls}
             value={name}
-            onChange={(e) => setName(e.target.value)}
+            onChange={(e) => handleNameChange(e.target.value)}
             placeholder="예: 삼성전자, 강남 아파트..."
           />
         </div>
@@ -167,8 +199,43 @@ export default function AssetCreateForm({ defaultType, onClose }: Props) {
           <p className="text-xs text-gray-500 font-medium uppercase">주식 상세</p>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className={labelCls}>계좌명</label>
-              <input className={inputCls} value={accountName} onChange={(e) => setAccountName(e.target.value)} />
+              <label className={labelCls}>
+                계좌명
+                {accountMode === 'new' && existingAccounts.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setAccountMode('select')}
+                    className="ml-2 text-blue-400 hover:underline normal-case"
+                  >
+                    기존 계좌에서 선택
+                  </button>
+                )}
+              </label>
+              {accountMode === 'select' && existingAccounts.length > 0 ? (
+                <select
+                  className={inputCls}
+                  value={existingAccounts.includes(accountName) ? accountName : ''}
+                  onChange={(e) => {
+                    if (e.target.value === '__new__') {
+                      setAccountMode('new')
+                      setAccountName('')
+                    } else {
+                      setAccountName(e.target.value)
+                    }
+                  }}
+                >
+                  <option value="">— 계좌 선택 —</option>
+                  {existingAccounts.map((a) => <option key={a} value={a}>{a}</option>)}
+                  <option value="__new__">＋ 새 계좌 입력</option>
+                </select>
+              ) : (
+                <input
+                  className={inputCls}
+                  value={accountName}
+                  onChange={(e) => setAccountName(e.target.value)}
+                  placeholder="예: NH 증권, ISA..."
+                />
+              )}
             </div>
             <div>
               <label className={labelCls}>통화</label>
